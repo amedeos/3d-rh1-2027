@@ -1,0 +1,37 @@
+[project]
+name = "rh1charms"
+version = "0.1.0"
+description = "Parametric, 3D-printable wearable charms (a name tag and a moka pot) in colour bands, for the Italian Consulting team at Red Hat's RH1 2027"
+readme = "README.md"
+requires-python = ">=3.13,<3.15"
+dependencies = [
+    "build123d>=0.13.0",
+    "fonttools>=4.60",
+    "numpy>=2",
+    "pillow>=12.0.0",
+    "shapely>=2.1.0",
+    "trimesh>=4.5.0",
+]
+
+[project.scripts]
+rh1charms = "rh1charms:main"
+
+[build-system]
+requires = ["uv_build>=0.12.24,<0.14.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "networkx>=3.4",
+    "pytest>=8.3",
+    "rtree>=1.3",
+    "ruff>=0.17",
+    "scipy>=1.14",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 100

@@ -1,0 +1,104 @@
+# AGENTS.md
+
+Guidance for coding agents working in this repository.
+
+## Project
+
+Parametric, 3D-printable wearable charms for the Italian Consulting team at Red Hat's RH1 2027 (Las Vegas, January 2027): a name tag (`consulting@italy:~$` between a green and a red band) and a tricolour moka pot, each with an eyelet, magnets (plus a counter plate worn inside the shirt) or, for the tag, a lanyard clip. The Python package and command are `rh1charms`. It follows the owner's earlier project `/workspace/3d-linux` (github.com/amedeos/3d-linux), from which `params.py`, most of `relief.py`, `export.py`, `slicer.py` and `render.py` come.
+
+- **Printer:** Prusa MK4 (Input Shaper firmware) with **one extruder**: no MMU, no INDX. Colours come only from M600 colour changes by layer height.
+- **Slicer profile:** PrusaSlicer "Original Prusa MK4 Input Shaper 0.4 nozzle", "0.20mm STRUCTURAL @MK4IS 0.4", "Prusament PETG @PGIS". 0.2 mm layers (first layer too), 0.45 mm lines. **No supports.**
+- **Material:** **Prusament PETG only**, in white, red, green and black (`filaments.FILAMENTS`). Do not add other colours or materials without asking.
+- **License:** CC BY-SA 4.0. The font keeps the SIL OFL 1.1.
+- **Trademarks:** Red Hat and RH1 are trademarks of Red Hat, Inc. **Never use the Red Hat logo anywhere** (models, renders, docs).
+
+## Language
+
+- Write all repository text in **English at B2/C1 level**: README, docstrings, comments. Use clear, short sentences and common words.
+- In Markdown, write each paragraph and each list item on **one line** (no hard wraps).
+- The owner chats in Italian.
+
+## Environment and commands
+
+- Python 3.14 (3.13 also works), [uv](https://docs.astral.sh/uv/), [build123d](https://github.com/gumyr/build123d) 0.13, fontTools, shapely 2.
+
+```sh
+uv sync
+uv run pytest                  # ~2 min
+uv run ruff check
+uv run rh1charms list
+uv run rh1charms export [CHARM|tag|moka ...] [--wear W] [--layout L] [--copies N] [--set key=value]
+uv run rh1charms slice         # optional, PrusaSlicer CLI
+uv run rh1charms render [CHARM|tag|moka ...]
+```
+
+- The modules also run on their own: `python -m rh1charms.slicer|render` (render takes the same names and options as the command).
+- The output is `out/stl/`, `out/3mf/` (plates and `plan.json`: each plate's start filament, colour changes and bridges), `out/3mf/projects/` and `out/render/`.
+- PrusaSlicer may have no data directory on a headless machine ("Configuration wasn't found"). Make a folder with `vendor/PrusaResearch.ini` (copied from `/usr/share/PrusaSlicer/profiles/`) and a `PrusaSlicer.ini` with `[presets]` (the three profile names) and `[vendor:PrusaResearch]` / `model:MK4IS = 0.4`, then run `PRUSA_SLICER="prusa-slicer --datadir <folder>" uv run rh1charms slice`.
+
+## Layout
+
+| File | Role |
+|---|---|
+| `src/rh1charms/params.py` | Printer grid (`LAYER`, `LINE_W`, `lines()`, `layers()`, `layer_top()`, `snap_up()`, `on_grid()`), `MIN_STROKE`, `MIN_GAP`, the body and band thicknesses, the eyelet, magnet, counter plate, gauge and clip sizes, `OUT` |
+| `filaments.py` | The four filaments (name → hex) and the PrusaSlicer material profile |
+| `fonts/` | Red Hat Mono Bold and its OFL, from a pinned commit (`fonts/README.md`). `text.py` raises an error at import if the file is missing: never fall back to another font |
+| `text.py` | Glyph outlines with fontTools (curves flattened, nonzero fill rule evaluated exactly with winding numbers), line layout (monospace grid, `two_lines` split), the smallest font size (`limits()`), `size_problems()` |
+| `charms.py` | `Charm` (frozen dataclass): subject, wear, layout and every parameter; `VARIANTS` (the 8 defaults); `charm(name, **overrides)`, `parse_name()`, `parse_value()`, `validate()` |
+| `artwork.py` | The tag and moka drawings in 2D: colour regions (filament → shapely geometry) and the body |
+| `relief.py` | Regions → printable bands (`colour_bands`, as in 3d-linux) → build123d solids (`slab`, `stack`, `fuse`, GRID and INSET) |
+| `wear.py` | `layout()`: the eyelet tab, the magnet pockets or the clip, band 0 as stacked slabs (`slabs0`), the centre of mass; `band_z`, `colour_changes`, `bridges`; the solids (`band_parts`, `make_charm`, `coloured`, `mass_centre`) |
+| `magnets.py` | Counter plates and the pocket gauge; `extras()`, the single-colour parts a list of charms needs (export and render both use it) |
+| `export.py` | Jobs and plates (`--copies` in a grid), checks, STL, 3MF with the M600s as PrusaSlicer metadata, `plan.json` (an existing one is read, and must be sound, before anything is written); `describe()`, the one-line summary of `list` and `export` |
+| `slicer.py` | Optional PrusaSlicer CLI run: time and filament, M600 check (heights and colours) against `plan.json`, a second slice with automatic supports that must create none, a bridge check at every height `plan.json` lists, projects with the full config and the start filament as the filament colour |
+| `render.py` | numpy z-buffer renderer (no OpenGL, from 3d-linux); `charm_images()` (front, back, edge, flat, hang), `plate_images()`, `all_images()`; `mask()` rasterises a geometry (also used by the tests) |
+| `__init__.py` | The `rh1charms` command; `select()` turns names and `--wear`/`--layout` into charm names. Every charm is laid out before a command writes anything. `slice` takes no names or options. `python -m rh1charms.render` runs `rh1charms render` |
+| `tests/` | pytest suite. Keep it green. |
+
+## How a charm is built
+
+- **Bands.** `bands[0]` (white) prints the whole body. Band k (k ≥ 1) covers every region whose colour is band k or higher, so the bands are nested: nothing hangs in the air. Band k starts at `base_t + (k - 1) * band_t`; its M600 is at `layer_top()` of that height. A region in white (the moka's waist and facet grooves) shows at the top of the body. Under a green or black region, the bands below show as stripes on its side walls: one extruder colours by Z only.
+- **Numbers.** `Charm.validate()` refuses nan and inf (they pass every comparison), and `on_grid()` allows only floating-point noise (1e-6): a thickness a hair off the grid would move the next M600 one layer late.
+- **Cleanup in 2D, not in OCCT.** All booleans run in shapely. `relief.colour_bands` comes from 3d-linux unchanged: it opens every band by `MIN_STROKE / 2`, widens or fills gaps narrower than `MIN_GAP` and fills hairline cracks. It **repairs silently**, so anything that must hold exactly (the text) is checked before it runs.
+- **The font size (`text.py`).** Font size = em size in mm. The glyphs scale linearly, so the text is measured once at one em. `narrowest()` finds the largest closing radius (the narrowest gap) and the largest opening radius (the thinnest stroke) that keep the topology: the number of pieces and holes. A wider closing would join two strokes or seal a counter; a wider opening would break a stroke or remove a piece. Crotches and stroke tips do not change the topology: every size has them, and the printer only rounds them. The size is the smallest one, rounded up to 0.1 mm, with gap ≥ `MIN_GAP` and stroke ≥ `MIN_STROKE`. For `consulting@italy:~$` it is 8.3 mm, set by the slot between the stem and the ring of the `@` (0.0548 em); `$` alone would allow 6.5 mm. A forced `font_size` below that raises an error in `artwork.tag()`, before `colour_bands`. The topology misses one kind of stroke: one that vanishes without changing it (the foot of an `L`, the bar of a `T` or a `7`). So `wear._artwork_and_bands` also checks, for every text, that the letters come through `colour_bands` unchanged but for their corners (`text_damage`: same pieces and holes, no lost piece over `LOST_MAX`, at most `LOST_SHARE` of the area, no filled gap over `SPECK`). An automatic size goes up 0.1 mm at a time until they do (`LT`: 2.1 → 5.1 mm; `Artwork.size_bound` says why); a forced size that fails is an error. `tests/test_text.py` checks the size with a second, independent measure on pixels, and the letters of the default and of such texts after the cleanup.
+- **The tag.** A rounded rectangle (`CORNER`), with full-bleed `END_BAND` bands (green left, red right) and the red text in the white middle, `TEXT_MARGIN` from the bands and the edges. Its size follows from the text. `two_lines` splits before the last `@` or at `\n`; the lines are left-aligned, `LINE_PITCH` em apart.
+- **The moka.** The polygons in `artwork.py` as given (origin at the bottom centre, y up), painted in order (a later part covers an earlier one). The facet grooves are cut down to white. The body is the union, 0.9 mm larger, with its holes filled. **The handle comes clockwise**: `relief._faces` turns every outline counter-clockwise, and every extrude still passes `dir=(0, 0, 1)`.
+- **Eyelet.** A tab (`tab_r`, 4 mm) with a `hole_d` (4 mm) hole: a 2.0 mm ring. Band 0 only. It sits on the highest point of the body under it, and `_settle` finds where the hole is over the centre of mass (from the 2D slabs; `test_wear.py` checks it on the solids). `_settle` uses the secant method: what it places moves the centre of mass, for a wide clip channel the other way and almost as far, and a plain repetition of x = centre of mass then swings from side to side.
+- **Magnets.** The body is `MAGNET_BODY_T` = 2.8 mm: pockets `POCKET_DEPTH` = 2.2 mm deep from the bed, under a `ROOF_T` = 0.6 mm bridged roof. The pocket diameter is `MAGNET_D + magnet_clr`; the clearance never changes the depth or the roof (the grid). The tag has two pockets at a quarter of its width from each end, the moka one at the chamber's centroid height, on the centre of mass. Every pocket keeps `MIN_POCKET_WALL`. The counter plate (`COUNTER_T` = 3.0 mm, `COUNTER_FLOOR` = 0.8 mm, pockets open on top) has the charm's pockets mirrored. The pocket gauge prints its pockets like the charm's (bed side, same roof): it measures the first layer's squish.
+- **Clip (owner's choice: solid to the bed).** The spec put the tag at z = 2.8 on two risers, which left about 40 mm of tag unsupported on each side of the channel. So, outside the channel, the body goes down to the bed and its walls are the risers (at least `RISER_W`). Band 0 is three slabs: the floor (walls + bar, 0–1.2 mm), the walls (1.2–2.8), the whole body (2.8–4.0). The bar (`BAR_W` × `BAR_T`) joins the left wall (`OVERLAP`) and stops `SLIT` before the right one. The channel (`lanyard_w + CHANNEL_EXTRA`) runs across the whole height of the tag and lies over the centre of mass; if the walls at the ends of the tag stop it short of that (a lanyard almost as wide as the tag), it is an error, not a tag that hangs crooked. The check that a charm is too narrow is geometric (`_strips`: the widest rectangle `BAR_W` high inside the body), so the moka fails with the widths, not because of its name.
+- **Plates.** One variant per plate (one M600 schedule): `--copies` copies in a grid centred on the bed (`GAP`). A magnet charm adds its counter plate (the same copies) and the gauge (once). Every plate is laid out before anything is written; too many copies is an error with the largest number. `plan.json` holds each plate's `start`, `changes` and `bridges`.
+
+## Frames
+
+- **2D:** x along the charm (centred on the tag; the moka's boiler centre at x = 0), y up as worn. The tag's bottom edge is at y = 0; the moka's boiler bottom is at y = 0, its body reaches y = -0.9.
+- **Print pose:** the same x and y on the bed, the front face up (+z), z = 0 on the bed.
+- **Worn (renders):** `wear.standing()` turns the charm up: the front faces -y, y becomes z.
+
+## Checks after any change
+
+1. Run `uv run pytest` and `uv run ruff check`. The tests cover the font and the smallest font size (two measures), the layer grid, the M600 heights, the band order and nesting, raised strokes and open grooves, floating islands, valid single watertight solids, the volume of the slabs, the handle's orientation, the eyelet (balance, ring), the pockets (diameter, depth, roof, walls, positions, clearance), the counter plates and the gauge, the clip (gap, slit, channel, walls, bar), the plates (bed fit, copies, start filament, M600s, bridges), the slicer checks with a fake PrusaSlicer, the renders and the command.
+2. Run `uv run rh1charms export`. Every part must print `OK`. Compare the volumes with the previous run.
+3. Run `uv run rh1charms render` and look at the images: `_flat.png` for the colours and letters, `_back.png` for pockets and clip, `_edge.png` for the bands and the channel, `_hang.png` for the balance (the mark on the centre of mass lies on the plumb line).
+4. If PrusaSlicer is available, run `uv run rh1charms slice`: every plate must say `OK` (M600s, no support, bridges). Update the times and grams in the README.
+5. **At the end of every new implementation, run the `code-review` skill at level `xhigh`** (the owner's rule), fix the verified findings, and run steps 1–4 again.
+
+## 3MF and PrusaSlicer notes (from 3d-linux)
+
+- PrusaSlicer reads `Metadata/Prusa_Slicer_custom_gcode_per_print_z.xml` even from a 3MF without print settings. That is how the M600s travel with the plates. One `<code>` per change, one `<mode>`. The `code` and `mode` elements need `bed_idx="0"` (PrusaSlicer 2.9 has multiple beds): without it the GUI silently drops them.
+- PrusaSlicer ignores the object colours of a 3MF. It shows the layers before the first M600 in the filament profile's colour (orange for Prusament PETG). So `slicer.py` passes the plate's start filament (`plan.json`) with `--filament-colour`, and the project carries it. The GUI marks the filament preset as "(modified)": that is expected.
+- The CLI crashes on `--export-3mf` without a display. So `slicer.py` slices to text G-code, copies the `; prusaslicer_config` block into `Metadata/Slic3r_PE.config` and sets `binary_gcode = 1` again.
+- The MK4 profiles build supports only inside support enforcers. `slicer.py` slices once more with `--support-material --support-material-auto --dont-support-bridges`; the result must have no support. That probe ignores bridges, so `slice` also checks that every height in `plan.json`'s `bridges` prints `;TYPE:Bridge infill`.
+- The probe also passes `--raft-first-layer-expansion 0`. The profile widens the first layer of every support by 3 mm; under a free edge of the clip channel's ceiling (the two-line tag) the support generator trimmed its column to nothing, but the widened first layer stayed as a pad on the bed that supports nothing. A real column still prints its first layer without the widening.
+
+## build123d gotchas
+
+- **Always pass `dir=(0, 0, 1)` when you extrude a face**, and keep the outlines counter-clockwise (`relief._faces`): a clockwise face extrudes downwards.
+- `Wire.make_polygon` cannot close a ring with near-duplicate points: `relief._wire()` drops them.
+- **Micro-edges.** Every corner lies on `GRID` (1 µm, `_faces` rounds with `shapely.set_precision`), and band k's solid is `k * INSET` (2 µm per band) inside the band's edge, so a band's edge never touches the edge of the band below.
+- `slab()` returns one solid per polygon, collected in a compound, with no boolean; `fuse()` joins all the bands in one go.
+- `layout`, `band_parts`, `make_charm`, `make_counter` and `make_gauge` are cached (`functools.cache`, keyed by the frozen `Charm`). Never change a returned part in place; transform it (`Pos(...) * part`) or combine it. `Shape.clean()` works in place: copy a cached part first.
+- Once OCP is loaded, Python's default text encoding can become ASCII. Always pass `encoding="utf-8"` to `read_text`/`write_text`.
+
+## Git
+
+Do not commit or push unless the owner asks. In commit messages, the co-author line is `Co-Authored-By: Claude Opus <noreply@anthropic.com>`, without a version number.
