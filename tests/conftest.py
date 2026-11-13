@@ -8,12 +8,12 @@ from shapely.ops import unary_union
 
 from rh1charms.charms import VARIANTS
 from rh1charms.export import jobs
-from rh1charms.magnets import GAUGE
+from rh1charms.magnets import CLIP_GAUGE, GAUGE
 
 CHARMS = list(VARIANTS.values())
 MAGNETS = [c for c in CHARMS if c.wear == "magnet"]
-# every printable part by name: the charms, the counter plates and the pocket gauge
-NAMES = [c.name for c in CHARMS] + [c.counter_name for c in MAGNETS] + [GAUGE]
+# every printable part by name: the charms, the counter plates and the two gauges
+NAMES = [c.name for c in CHARMS] + [c.counter_name for c in MAGNETS] + [GAUGE, CLIP_GAUGE]
 
 
 def charm_id(c) -> str:

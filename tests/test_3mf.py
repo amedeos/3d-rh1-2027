@@ -21,9 +21,10 @@ from rh1charms.export import (
     max_copies,
     plate_plan,
     plates,
+    single_plate_name,
     write_3mf,
 )
-from rh1charms.magnets import GAUGE
+from rh1charms.magnets import CLIP_GAUGE, GAUGE
 from rh1charms.slicer import M600_ENTRY
 
 PLATES = {1: plates(CHARMS), 6: plates(CHARMS, copies=6)}
@@ -54,7 +55,7 @@ def test_plate_is_centred_on_the_bed(n, name):
 
 def test_copies_of_one_variant_share_a_plate():
     """One M600 serves the whole plate: N copies of one charm, the same N counter plates,
-    one gauge. Every variant has its own plate (different band heights)."""
+    one of each gauge. Every variant has its own plate (different band heights)."""
     six = PLATES[6]
     for c in CHARMS:
         objects, changes, _ = six[charm_plate_name(c)]
@@ -65,7 +66,9 @@ def test_copies_of_one_variant_share_a_plate():
         assert len(objects) == 6 and changes == []
     objects, changes, _ = six[gauge_plate_name("white")]
     assert [name for name, _, _ in objects] == [GAUGE] and changes == []
-    assert len(six) == len(CHARMS) + len(MAGNETS) + 1
+    objects, changes, _ = six[single_plate_name(CLIP_GAUGE, "white")]
+    assert [name for name, _, _ in objects] == [CLIP_GAUGE] and changes == []
+    assert len(six) == len(CHARMS) + len(MAGNETS) + 2
 
 
 def test_too_many_copies_is_an_error_with_the_largest_number():
@@ -86,7 +89,8 @@ def test_export_stops_before_writing_when_the_copies_do_not_fit(tmp_path):
 
 def test_plan_gives_start_filament_colour_changes_and_bridges():
     """The start filament goes into the project's filament colour; the bridges are the
-    first layer over the pocket roofs (2.40) and over the clip channel (3.00)."""
+    first layer over the pocket roofs (2.40) and over the clip channel (3.00), on the
+    gauges too."""
     plan = plate_plan(PLATES[1])
     for c in CHARMS:
         entry = plan[charm_plate_name(c)]
@@ -97,6 +101,8 @@ def test_plan_gives_start_filament_colour_changes_and_bridges():
         assert plan[counter_plate_name(c)] == {"start": "white", "changes": [], "bridges": []}
     assert plan[gauge_plate_name("white")] == {"start": "white", "changes": [],
                                                "bridges": [2.4]}
+    assert plan[single_plate_name(CLIP_GAUGE, "white")] == {"start": "white", "changes": [],
+                                                            "bridges": [3.0]}
 
 
 def test_plate_without_one_start_filament_is_refused():
@@ -116,7 +122,8 @@ def test_m600_metadata_lists_every_change():
 
 @pytest.mark.parametrize("name", ["moka_magnet_white-red-green-black",
                                   "tag_two_lines_clip_white-red-green",
-                                  "tag_one_line_counter_white", "pocket_gauge_white"])
+                                  "tag_one_line_counter_white", "pocket_gauge_white",
+                                  "clip_gauge_white"])
 def test_3mf_content(tmp_path, name):
     objects, changes, _ = PLATES[6][name]
     path = tmp_path / f"{name}.3mf"

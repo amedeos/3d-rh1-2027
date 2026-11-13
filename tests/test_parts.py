@@ -1,4 +1,5 @@
-"""Valid, watertight single solids, built the right way up."""
+"""Valid, watertight single solids (the clip gauge: one per piece), built the right way
+up."""
 
 import numpy as np
 import pytest
@@ -8,12 +9,12 @@ from shapely.geometry import LinearRing
 
 from rh1charms import artwork, relief, wear
 from rh1charms.charms import VARIANTS
-from rh1charms.export import check, mesh_problems
+from rh1charms.export import bodies, check, mesh_problems
 
 
 @pytest.mark.parametrize("name", NAMES)
 def test_part_is_printable(parts, name):
-    assert check(parts[name]) == []
+    assert check(parts[name], bodies(name)) == []
 
 
 @pytest.mark.parametrize("name", NAMES)

@@ -7,9 +7,9 @@
 
 One M600 serves the whole plate, so a plate holds `copies` of one charm with one way of
 wearing it: different variants have different band heights. A magnet charm brings its
-counter plate (the same number of copies) and the pocket gauge (once): both are plates in
-one colour. A charm plate carries all its colour changes as PrusaSlicer metadata, so they
-are already set when you open the file.
+counter plate (the same number of copies) and the pocket gauge (once), a clip charm the
+clip gauge (once): they are plates in one colour. A charm plate carries all its colour
+changes as PrusaSlicer metadata, so they are already set when you open the file.
 
 plan.json is written from the design: slicer.py checks the real G-code and the projects
 against it, not against the 3MF it is checking. "bridges" lists the print_z of the first
@@ -31,7 +31,7 @@ from build123d import Color, Mesher, Part, Pos, export_stl
 from . import params as P
 from .charms import Charm
 from .filaments import FILAMENTS
-from .magnets import GAUGE, extras
+from .magnets import CLIP_GAUGE, GAUGE, extras
 from .wear import bridges, colour_changes, layout, make_charm
 
 BED = P.BED
@@ -50,7 +50,7 @@ def charm_plate_name(c: Charm) -> str:
 
 
 def single_plate_name(name: str, colour: str) -> str:
-    """The plate of a part in one colour: a counter plate or the gauge."""
+    """The plate of a part in one colour: a counter plate or a gauge."""
     return f"{name}_{colour}"
 
 
@@ -62,15 +62,25 @@ def gauge_plate_name(colour: str) -> str:
     return single_plate_name(GAUGE, colour)
 
 
+# the parts that come once on their plate, whatever the copies: (bridges, bodies)
+GAUGES = {GAUGE: ([P.layer_top(P.POCKET_DEPTH)], 1),
+          CLIP_GAUGE: ([P.layer_top(P.CLIP_Z)], len(P.CLIP_GAUGE_SLITS))}
+
+
+def bodies(name: str) -> int:
+    """How many separate bodies a part has: the clip gauge one per piece, the rest one."""
+    return GAUGES[name][1] if name in GAUGES else 1
+
+
 def jobs(charms: list[Charm]) -> dict[str, tuple[str, Job]]:
     """part name -> (plate name, job): every charm, the counter plate of every magnet charm,
-    and the pocket gauge once if any charm has magnets."""
+    the pocket gauge once if any charm has magnets, the clip gauge once if any has a clip."""
     out = {}
     for c in charms:
         out[c.name] = (charm_plate_name(c), (make_charm(c), c.bands[0], colour_changes(c),
                                              bridges(c)))
-    for name, colour, build in extras(charms):  # the counter plates and the gauge
-        ceilings = [P.layer_top(P.POCKET_DEPTH)] if name == GAUGE else []
+    for name, colour, build in extras(charms):  # the counter plates and the gauges
+        ceilings = list(GAUGES[name][0]) if name in GAUGES else []
         out[name] = (single_plate_name(name, colour), (build(), colour, [], ceilings))
     return out
 
@@ -105,11 +115,11 @@ def grid(name: str, part: Part, copies: int, gap: float = GAP) -> list[Part]:
 
 
 def plates(charms: list[Charm], copies: int = 1) -> dict[str, Plate]:
-    """plate name -> plate. The charms and counter plates come `copies` times, the gauge
+    """plate name -> plate. The charms and counter plates come `copies` times, the gauges
     once. A plate that does not fit stops everything before any file is written."""
     out = {}
     for name, (plate, (part, colour, changes, ceilings)) in jobs(charms).items():
-        n = 1 if name == GAUGE else copies
+        n = 1 if name in GAUGES else copies
         placed = grid(name, part, n)
         objects = [(name if n == 1 else f"{name} {k + 1}", p, colour)
                    for k, p in enumerate(placed)]
@@ -134,8 +144,9 @@ def plate_plan(all_plates: dict[str, Plate]) -> dict[str, dict]:
     return plan
 
 
-def check(part: Part) -> list[str]:
-    """Problems with the CAD solid itself (empty list = fine)."""
+def check(part: Part, expected_bodies: int = 1) -> list[str]:
+    """Problems with the CAD solid itself (empty list = fine). A part is one body, but for
+    the clip gauge (`bodies`)."""
     problems = []
     bb = part.bounding_box()
     if not part.is_valid:
@@ -144,8 +155,8 @@ def check(part: Part) -> list[str]:
         problems.append(f"not on the bed (zmin={bb.min.Z:.3f})")
     if bb.size.X > BED[0] or bb.size.Y > BED[1] or bb.size.Z > BED[2]:
         problems.append(f"larger than the bed {bb.size}")
-    if len(part.solids()) != 1:
-        problems.append(f"{len(part.solids())} separate bodies")
+    if len(part.solids()) != expected_bodies:
+        problems.append(f"{len(part.solids())} separate bodies, not {expected_bodies}")
     return problems
 
 
@@ -241,7 +252,7 @@ def export_all(out: Path, charms: list[Charm], copies: int = 1) -> dict[str, lis
     mf_dir.mkdir(parents=True, exist_ok=True)
     report = {}
     for name, part in parts.items():
-        problems = check(part) + write_stl(part, stl_dir / f"{name}.stl")
+        problems = check(part, bodies(name)) + write_stl(part, stl_dir / f"{name}.stl")
         report[name] = problems
         status = "OK" if not problems else "; ".join(problems)
         print(f"{name:24s} {part.volume / 1000:6.2f} cm3  {status}")

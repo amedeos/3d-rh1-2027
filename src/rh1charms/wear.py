@@ -236,6 +236,21 @@ def _strips(body: BaseGeometry, height: float, step: float = 0.2):
     return out
 
 
+def clip_slabs(b0: BaseGeometry, x: float, ym: float, cw: float, slit: float,
+               top: float) -> tuple[list[Slab], Clip]:
+    """Band 0 of a clip, from the bed up: the floor (the walls and the bar), the walls beside
+    the channel, then the whole body up to `top`. The channel is `cw` wide, centred on x,
+    and runs across the whole body. The bar is BAR_W high, centred on ym: it joins the left
+    wall and stops `slit` short of the right one. The clip gauge uses it too."""
+    _, y0, _, y1 = b0.bounds
+    channel = box(x - cw / 2, y0 - 1, x + cw / 2, y1 + 1)
+    walls = relief.tidy(b0.difference(channel))
+    bar = (x - cw / 2 - P.OVERLAP, x + cw / 2 - slit, ym - P.BAR_W / 2, ym + P.BAR_W / 2)
+    floor = relief.tidy(unary_union([walls, box(bar[0], bar[2], bar[1], bar[3])]))
+    slabs = [(floor, 0.0, P.BAR_T), (walls, P.BAR_T, P.CLIP_Z), (b0, P.CLIP_Z, top)]
+    return slabs, Clip((x - cw / 2, x + cw / 2), bar, walls)
+
+
 def _clip(c: Charm, art, bands, z, upper) -> CharmLayout:
     cw = c.lanyard_w + P.CHANNEL_EXTRA
     need = cw + 2 * P.RISER_W
@@ -257,12 +272,8 @@ def _clip(c: Charm, art, bands, z, upper) -> CharmLayout:
         return min(max(x, lo + need / 2), hi - need / 2)
 
     def place(x: float):
-        channel = box(x - cw / 2, y0 - 1, x + cw / 2, y1 + 1)
-        walls = relief.tidy(b0.difference(channel))
-        bar = (x - cw / 2 - P.OVERLAP, x + cw / 2 - P.SLIT, ym - P.BAR_W / 2, ym + P.BAR_W / 2)
-        floor = relief.tidy(unary_union([walls, box(bar[0], bar[2], bar[1], bar[3])]))
-        slabs0 = [(floor, 0.0, P.BAR_T), (walls, P.BAR_T, P.CLIP_Z), (b0, P.CLIP_Z, c.base_t)]
-        return slabs0 + upper, Clip((x - cw / 2, x + cw / 2), bar, walls)
+        slabs0, clip = clip_slabs(b0, x, ym, cw, P.SLIT, c.base_t)
+        return slabs0 + upper, clip
 
     start = clamp(relief.centre([(b0, *z[0]), *upper])[0])
     x, slabs, com, clip = _settle(c.name, "the clip", start, place, clamp)

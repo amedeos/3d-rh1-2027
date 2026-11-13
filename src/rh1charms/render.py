@@ -332,7 +332,7 @@ def charm_images(c, out: Path) -> list[Path]:
 
 
 def plate_images(name: str, part, colour: str, out: Path) -> list[Path]:
-    """A part in one colour (a counter plate, the gauge): from above, from below, and the
+    """A part in one colour (a counter plate, a gauge): from above, from below, and the
     edge profile."""
     out.mkdir(parents=True, exist_ok=True)
     bb = part.bounding_box()
@@ -347,7 +347,7 @@ def plate_images(name: str, part, colour: str, out: Path) -> list[Path]:
 
 def all_images(charms, out: Path = OUT) -> list[Path]:
     """The images of every charm, and of the single-colour parts they need (the counter
-    plates and the pocket gauge, as export makes them: magnets.extras), into out/render."""
+    plates and the gauges, as export makes them: magnets.extras), into out/render."""
     from .magnets import extras
 
     folder = out / "render"

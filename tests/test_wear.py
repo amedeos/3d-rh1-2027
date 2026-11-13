@@ -10,6 +10,7 @@ from shapely.geometry import Point, Polygon, box
 from rh1charms import magnets, relief, wear
 from rh1charms import params as P
 from rh1charms.charms import VARIANTS, charm
+from rh1charms.export import check, plates
 from rh1charms.relief import polygons
 
 EYELETS = [c for c in VARIANTS.values() if c.wear == "eyelet"]
@@ -143,9 +144,9 @@ def _gaps_x(geom, y: float) -> list[float]:
 def test_clip_clearances(parts, c):
     part = parts[c.name]
     lay = wear.layout(c)
-    _, ym0, _, ym1 = lay.clip.bar
+    _, _, ym0, ym1 = lay.clip.bar  # x0, x1, y0, y1
     ym = (ym0 + ym1) / 2
-    # the bar on the bed: joined to one wall, a 0.7 mm slit before the other
+    # the bar on the bed: joined to one wall, a slit before the other
     floor = section(part, P.BAR_T / 2)
     assert len(polygons(floor)) == 2
     assert _gaps_x(floor, ym) == pytest.approx([P.SLIT], abs=0.01)
@@ -165,6 +166,73 @@ def test_clip_clearances(parts, c):
         assert cut.intersection(box(x0 + 0.01, -1e3, x1 - 0.01, 1e3)).area < 1e-6
     assert len(polygons(section(part, 2.9))) == 1  # the tag bridges the channel
     assert P.CLIP_Z - P.BAR_T == pytest.approx(1.6)
+
+
+def test_clip_takes_the_ribbon():
+    """The measured ribbon goes through the slit on its edge and lies flat under the bar,
+    on the tag and on every piece of the gauge."""
+    assert P.SLIT > P.RIBBON_T
+    assert min(P.CLIP_GAUGE_SLITS) > P.RIBBON_T
+    assert P.RIBBON_GAP > P.RIBBON_T
+
+
+def test_clip_gauge_has_the_tag_clip_with_four_slits(parts):
+    """Four pieces, left to right, each one the back of the first clip tag: the same channel,
+    bar, ribbon gap and ceiling, as tall as the tag. Only the slit differs, with 1 to 4
+    dots on top."""
+    c = CLIPS[0]
+    lay = wear.layout(c)
+    _, _, ym0, ym1 = lay.clip.bar  # x0, x1, y0, y1
+    ym = (ym0 + ym1) / 2
+    _, ty0, _, ty1 = lay.bands[0].bounds
+    gauge = parts[magnets.CLIP_GAUGE]
+    pieces = sorted(gauge.solids(), key=lambda s: s.bounding_box().min.X)
+    assert len(pieces) == len(P.CLIP_GAUGE_SLITS) == 4
+    for k, (piece, slit) in enumerate(zip(pieces, P.CLIP_GAUGE_SLITS)):
+        bb = piece.bounding_box()
+        assert (bb.min.Y, bb.max.Y) == pytest.approx((ty0, ty1), abs=0.01)
+        floor = section(piece, P.BAR_T / 2)
+        assert len(polygons(floor)) == 2
+        assert _gaps_x(floor, ym) == pytest.approx([slit], abs=0.01)
+        x0, x1 = bb.min.X + magnets.CLIP_GAUGE_WALL, bb.max.X - magnets.CLIP_GAUGE_WALL
+        _, by0, _, by1 = floor.intersection(box(x0 + 0.5, -1e3, x1 - 0.5, 1e3)).bounds
+        assert (by0, by1) == pytest.approx((ym0, ym1), abs=0.01)  # where the tag has its bar
+        for z in (1.3, 2.0, 2.7):
+            cut = section(piece, z)
+            assert len(polygons(cut)) == 2
+            assert _gaps_x(cut, ym) == pytest.approx([c.lanyard_w + P.CHANNEL_EXTRA], abs=0.01)
+            assert min(p.bounds[2] - p.bounds[0] for p in polygons(cut)) >= P.RISER_W
+        assert len(polygons(section(piece, P.CLIP_Z + 0.1))) == 1  # the ceiling
+        assert bb.max.Z == pytest.approx(c.base_t + magnets.DOT_H)
+        assert len(polygons(section(piece, c.base_t + magnets.DOT_H / 2))) == k + 1
+    planned = sum(g.area * (z1 - z0) for slabs, _ in magnets.clip_gauge_layout(c)
+                  for g, z0, z1 in slabs)
+    planned += sum(d.area for _, d in magnets.clip_gauge_layout(c)) * magnets.DOT_H
+    assert gauge.volume == pytest.approx(planned, rel=2e-3)
+
+
+def test_clip_gauge_follows_the_charm_and_fits_the_bed():
+    """The two-line tag's gauge is as tall as that tag; a wide lanyard puts the pieces in
+    rows, so the gauge never stops an export of a clip charm that fits."""
+    c = VARIANTS["tag_two_lines_clip"]
+    gauge = magnets.make_clip_gauge(c)
+    assert len(gauge.solids()) == len(P.CLIP_GAUGE_SLITS)
+    _, y0, _, y1 = wear.layout(c).bands[0].bounds
+    assert {round(s.bounding_box().size.Y, 2) for s in gauge.solids()} == {round(y1 - y0, 2)}
+    wide = charm("tag_one_line_clip", lanyard_w=55.0)
+    plates([wide])  # does not raise
+    wide_gauge = magnets.make_clip_gauge(wide)
+    assert check(wide_gauge, len(P.CLIP_GAUGE_SLITS)) == []
+    bb = wide_gauge.bounding_box()
+    assert bb.size.X <= P.BED[0] and bb.size.Y <= P.BED[1]
+
+
+def test_clip_gauge_comes_once_with_a_clip_charm():
+    names = [name for name, _, _ in magnets.extras(CLIPS)]
+    assert names == [magnets.CLIP_GAUGE]
+    assert magnets.CLIP_GAUGE not in [n for n, _, _ in magnets.extras(EYELETS + MAGNETS)]
+    with pytest.raises(ValueError, match="only a clip charm"):
+        magnets.clip_gauge_layout(EYELETS[0])
 
 
 def test_clip_channel_follows_the_lanyard_width():

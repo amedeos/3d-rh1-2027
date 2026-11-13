@@ -25,7 +25,7 @@ def test_mask_keeps_holes():
 
 
 def test_every_part_gets_front_back_and_edge_images(tmp_path, monkeypatch):
-    """Every charm (both tag layouts), every counter plate and the gauge: front, back and
+    """Every charm (both tag layouts), every counter plate and the gauges: front, back and
     edge profile; a charm also its 2D bands, and a plumb line if it hangs from one point."""
     rendered = []
 
@@ -40,10 +40,10 @@ def test_every_part_gets_front_back_and_edge_images(tmp_path, monkeypatch):
         assert {f"{c.name}_{v}.png" for v in views} <= paths
         assert (f"{c.name}_hang.png" in paths) == (c.wear == "eyelet" or c.name == "moka_magnet")
     for name in ("tag_one_line_counter", "tag_two_lines_counter", "moka_counter",
-                 "pocket_gauge"):
+                 "pocket_gauge", "clip_gauge"):
         assert {f"{name}_{v}.png" for v in ("front", "back", "edge")} <= paths
     assert all((tmp_path / "render" / p).is_file() for p in paths)
-    assert len(rendered) == 3 * (len(CHARMS) + 4)
+    assert len(rendered) == 3 * (len(CHARMS) + 5)
 
 
 def test_hang_preview_drops_the_plumb_line_from_where_it_hangs(tmp_path):

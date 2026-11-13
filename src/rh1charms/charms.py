@@ -42,7 +42,7 @@ class Charm:
     lanyard_w: float = P.LANYARD_W  # ribbon width of the clip (mm)
     hole_d: float = P.HOLE_D  # eyelet hole
     tab_r: float = P.TAB_R  # outer radius of the eyelet tab
-    plate_colour: str = "white"  # filament of the counter plate
+    plate_colour: str = "white"  # filament of the counter plate and the gauges
 
     def __post_init__(self):
         if self.subject in DEFAULT_BANDS and not self.bands:

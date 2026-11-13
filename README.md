@@ -17,10 +17,10 @@ Everything is written in Python with [build123d](https://github.com/gumyr/build1
 |---|---|---|---|---|---|---|
 | `tag_one_line_eyelet` | 109.0 × 21.4 × 2.8 | white → red → green | red 1.40, green 2.20 | 8 min 49 s | 2.72 g | 14 |
 | `tag_one_line_magnet` | 109.0 × 13.4 × 4.4 | white → red → green | red 3.00, green 3.80 | 13 min 47 s | 4.27 g | 22 |
-| `tag_one_line_clip` | 109.0 × 13.4 × 5.6 | white → red → green | red 4.20, green 5.00 | 14 min 28 s | 4.87 g | 22 |
+| `tag_one_line_clip` | 109.0 × 13.4 × 5.6 | white → red → green | red 4.20, green 5.00 | 14 min 26 s | 4.86 g | 22 |
 | `tag_two_lines_eyelet` | 64.2 × 30.6 × 2.8 | white → red → green | red 1.40, green 2.20 | 8 min 24 s | 2.80 g | 15 |
 | `tag_two_lines_magnet` | 64.2 × 22.6 × 4.4 | white → red → green | red 3.00, green 3.80 | 12 min 52 s | 4.22 g | 21 |
-| `tag_two_lines_clip` | 64.2 × 22.6 × 5.6 | white → red → green | red 4.20, green 5.00 | 13 min 13 s | 4.49 g | 21 |
+| `tag_two_lines_clip` | 64.2 × 22.6 × 5.6 | white → red → green | red 4.20, green 5.00 | 13 min 12 s | 4.48 g | 21 |
 | `moka_eyelet` | 31.4 × 43.8 × 3.6 | white → red → green → black | red 1.40, green 2.20, black 3.00 | 7 min 42 s | 1.91 g | 24 |
 | `moka_magnet` | 31.4 × 35.8 × 5.2 | white → red → green → black | red 3.00, green 3.80, black 4.60 | 10 min 15 s | 2.53 g | 30 |
 
@@ -32,6 +32,7 @@ And the single-colour parts (white by default):
 | `tag_two_lines_counter` | 44.3 × 12.2 × 3.0 | `tag_two_lines_magnet` | 4 min 28 s | 1.42 g |
 | `moka_counter` | 12.2 × 12.2 × 3.0 | `moka_magnet` | 2 min 36 s | 0.35 g |
 | `pocket_gauge` | 53.3 × 15.7 × 3.2 | finding the magnet clearance | 7 min 59 s | 2.08 g |
+| `clip_gauge` | 127.0 × 13.4 × 4.4 | finding the clip slit | 14 min 55 s | 4.25 g |
 
 \* PrusaSlicer 2.9.6 estimates for one copy (Prusament PETG, 0.20mm STRUCTURAL), not counting the time for the filament changes. The size includes the eyelet; the thickness includes the colour bands.
 
@@ -63,7 +64,7 @@ uv run rh1charms render          # PNG previews in out/render
 
 ## Batches and parameters
 
-One colour change serves the whole plate, so print a batch: `--copies N` puts N copies of one charm, with one way of wearing it, on one plate. The variants have different band heights, so each one has its own plate. A magnet charm brings a plate with the same number of counter plates, and the pocket gauge. If the copies do not fit on the bed, `export` stops before it writes anything and tells you the largest number that fits. For example, six one-line clip tags take 1 h 24 min and 29 g of PETG, with the same two colour changes as one tag.
+One colour change serves the whole plate, so print a batch: `--copies N` puts N copies of one charm, with one way of wearing it, on one plate. The variants have different band heights, so each one has its own plate. A magnet charm brings a plate with the same number of counter plates, and the pocket gauge. A clip charm brings the clip gauge. If the copies do not fit on the bed, `export` stops before it writes anything and tells you the largest number that fits. For example, six one-line clip tags take 1 h 23 min and 29 g of PETG, with the same two colour changes as one tag.
 
 ```sh
 uv run rh1charms export tag --wear clip --copies 8          # both tag layouts, 8 each
@@ -85,7 +86,7 @@ A charm is a subject (`tag` or `moka`), a way to wear it (`--wear eyelet|magnet|
 - `magnet_clr`: the pocket clearance on the diameter (0.2: an 8.2 mm pocket for an 8 mm magnet). It changes only the diameter: the pocket stays 2.2 mm deep under a 0.6 mm roof.
 - `lanyard_w`: the ribbon width of the clip (20 mm; the channel is 2 mm wider). The channel must fit with its walls and lie over the centre of mass, or `export` says so.
 - `hole_d`, `tab_r`: the eyelet's hole and outer radius (4 mm and 4 mm: a 2 mm ring).
-- `plate_colour`: the filament of the counter plates and the gauge.
+- `plate_colour`: the filament of the counter plates and the gauges.
 
 ## Printing
 
@@ -101,8 +102,9 @@ There are three kinds of files. Use whichever you like:
 
 ### Test these first
 
-1. **One clip tag.** The underside of the tag bridges the 22 mm channel at 2.8 mm. PrusaSlicer confirms that it needs no support and prints the first layer over the channel as bridge infill. But the two ends of the channel, where the ribbon goes in and out, are free edges: their outer lines print as overhang perimeters across 22 mm, anchored on both walls. Print one tag and check that the ceiling is flat and the ribbon slides through, before you print a plate of them. (With automatic supports on, PrusaSlicer widens the first layer of every support by 3 mm. Under a free edge of the two-line tag it trimmed the support away but left that widened first layer, a pad on the bed that supports nothing: `slice` turns the widening off in its support check.)
-2. **The pocket gauge** (about 8 minutes), if you use magnets. It has four pockets of 8.0, 8.1, 8.2 and 8.3 mm, marked with 1 to 4 dots, printed exactly like the charm's: on the bed side, under the same 0.6 mm roof. Push a magnet into each one. Use the pocket that holds the magnet but still lets it in without force, and set `magnet_clr` to its diameter minus 8.0 (for example `--set magnet_clr=0.1` for the 8.1 mm pocket).
+1. **The clip gauge** (about 15 minutes), if you use the clip. It has four separate pieces, each one the back of a clip tag: the same channel, bar, ribbon gap and ceiling, as tall as the tag, but 4.4 mm thick: without the colour bands. Only the slit differs: 1.1, 1.3, 1.5 and 1.7 mm, marked with 1 to 4 dots. Try the ribbon in each piece: it must go in through the slit, slide along the channel, and stay in when you pull the piece sideways and twist it. Set `SLIT` in `src/rh1charms/params.py` to the narrowest slit that does all three, and export again. The gauge follows the first clip charm you export: its lanyard width and its height.
+2. **One clip tag.** The underside of the tag bridges the 22 mm channel at 2.8 mm. PrusaSlicer confirms that it needs no support and prints the first layer over the channel as bridge infill. But the two ends of the channel, where the ribbon goes in and out, are free edges: their outer lines print as overhang perimeters across 22 mm, anchored on both walls. Print one tag before you print a plate of them. Check that the ceiling is flat, that the ribbon goes in through the slit and slides along the channel, and that it stays in when you pull the tag sideways and twist it: a whole tag pulls harder than a piece of the gauge. If the ribbon comes out, set `SLIT` to the next narrower slit of the gauge. (With automatic supports on, PrusaSlicer widens the first layer of every support by 3 mm. Under a free edge of the two-line tag it trimmed the support away but left that widened first layer, a pad on the bed that supports nothing: `slice` turns the widening off in its support check.)
+3. **The pocket gauge** (about 8 minutes), if you use magnets. It has four pockets of 8.0, 8.1, 8.2 and 8.3 mm, marked with 1 to 4 dots, printed exactly like the charm's: on the bed side, under the same 0.6 mm roof. Push a magnet into each one. Use the pocket that holds the magnet but still lets it in without force, and set `magnet_clr` to its diameter minus 8.0 (for example `--set magnet_clr=0.1` for the 8.1 mm pocket).
 
 ## Wearing them
 
@@ -111,7 +113,7 @@ There are three kinds of files. Use whichever you like:
   - **Polarity.** Stack all the magnets in one column and mark the top face of each one with a marker. Glue every magnet with its **marked face showing**: in the charm and in the counter plate alike. Then the charm's magnets face the shirt with one pole and the plate's with the other, and they pull each other through the fabric. The plate is symmetric, so it can go either way round. Before the glue sets, try it on a shirt: the plate must pull the charm, not push it.
   - **Glue.** A drop of two-part epoxy or cyanoacrylate (super glue) in each pocket, then press the magnet in. It sits 0.2 mm below the surface. Let it cure before you wear it.
   - Wear the counter plate inside the shirt with its flat floor towards the fabric. Through thick fabric the magnets hold less: try them first.
-- **Lanyard clip.** A bar on the back holds a 20 mm ribbon (`lanyard_w`) in a 22 mm channel, 1.6 mm deep. The bar is joined to one wall and stops 0.7 mm short of the other. Turn the ribbon on its edge, push the edge through that slit, and turn it flat inside the channel. The channel lies over the centre of mass, so the tag hangs level.
+- **Lanyard clip.** A bar on the back holds a 20 mm ribbon (`lanyard_w`) in a 22 mm channel, 1.6 mm deep. The bar is joined to one wall and stops 1.5 mm short of the other: wide enough for the 1.04 mm ribbon of the 2026 RH1 lanyard. Turn the ribbon on its edge, push the edge through that slit, and turn it flat inside the channel. The channel lies over the centre of mass, so the tag hangs level. The slit is not a parameter: the clip gauge tells you which one to put in `SLIT` in `src/rh1charms/params.py` (see "Test these first"). If the 2027 lanyard has a thicker ribbon, measure it, write it in `RIBBON_T`, and choose the gauge's slits (`CLIP_GAUGE_SLITS`) above it: the tests check that `SLIT`, every slit of the gauge and the 1.6 mm ribbon gap are wider than the ribbon.
 
 ## The font
 
