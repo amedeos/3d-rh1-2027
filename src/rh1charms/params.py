@@ -81,9 +81,12 @@ CLIP_Z = round(BAR_T + RIBBON_GAP, 6)  # the underside of the tag over the chann
 RISER_W = 2.4  # the least wall beside the channel
 RIBBON_T = 1.04  # ribbon thickness, measured on the 2026 RH1 lanyard
 # The bar stops SLIT short of one wall: the ribbon slides in on its edge through the slit.
-# The margin over RIBBON_T is for the XY tolerance of the layers from 0.4 to 1.2 mm. In the
+# The owner chose 1.1 mm with the clip gauge on 2026-11-15. It is the gauge's narrowest
+# slit, and it took the 2026 ribbon and held it. That gauge was black PETG, and the tag's
+# body is white: the colour can change the printed width a little. Every slit needs a
+# margin over RIBBON_T for the XY tolerance of the layers from 0.4 to 1.2 mm. In the
 # first layer the slit prints 0.4 mm wider (elefant_foot_compensation = 0.2 mm a side).
-SLIT = 1.5
+SLIT = 1.1
 CLIP_GAUGE_SLITS = (1.1, 1.3, 1.5, 1.7)  # the slits of the clip gauge, marked with 1 to 4 dots
 LANYARD_W = 20.0  # default ribbon width (a parameter)
 CHANNEL_EXTRA = 2.0  # the channel is this much wider than the ribbon

@@ -170,9 +170,11 @@ def test_clip_clearances(parts, c):
 
 def test_clip_takes_the_ribbon():
     """The measured ribbon goes through the slit on its edge and lies flat under the bar,
-    on the tag and on every piece of the gauge."""
+    on the tag and on every piece of the gauge. SLIT is one of the gauge's slits: the
+    owner chooses it from the gauge."""
     assert P.SLIT > P.RIBBON_T
     assert min(P.CLIP_GAUGE_SLITS) > P.RIBBON_T
+    assert any(abs(P.SLIT - s) < 1e-6 for s in P.CLIP_GAUGE_SLITS)
     assert P.RIBBON_GAP > P.RIBBON_T
 
 
