@@ -2,6 +2,7 @@
 
 import json
 import re
+import xml.etree.ElementTree as ET
 import zipfile
 from itertools import combinations
 
@@ -116,8 +117,13 @@ def test_m600_metadata_lists_every_change():
     xml = m600_metadata([(1.4, "red"), (2.2, "green")])
     assert re.findall(r'print_z="([\d.]+)"', xml) == ["1.40", "2.20"]
     assert xml.count('gcode="M600"') == 2
-    # the PrusaSlicer 2.9 GUI ignores colour changes without a bed index
-    assert xml.count('bed_idx="0"') == 3 and xml.count("<mode ") == 1
+    # read it as PrusaSlicer 2.9 does: the bed index is on the custom_gcodes_per_print_z
+    # element (none means bed 0), the codes and the mode are its children
+    root = ET.fromstring(xml)
+    assert root.tag == "custom_gcodes_per_print_z" and root.get("bed_idx") == "0"
+    assert [child.tag for child in root] == ["code", "code", "mode"]
+    assert all(child.get("bed_idx") is None for child in root)
+    assert root.find("mode").get("value") == "SingleExtruder"
 
 
 @pytest.mark.parametrize("name", ["moka_magnet_white-red-green-black",

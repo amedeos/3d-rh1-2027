@@ -174,10 +174,14 @@ def _changes_text(changes: list[Change]) -> str:
 
 
 def make_project(plate: Path, config: str, out: Path) -> None:
+    """The plate with `config` as its print config. A plate saved from the PrusaSlicer GUI
+    already has a config: it is replaced, not added as a second entry with the same name."""
     out.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(plate, out)
-    with zipfile.ZipFile(out, "a", zipfile.ZIP_DEFLATED) as z:
-        z.writestr(CONFIG_ENTRY, config)
+    with zipfile.ZipFile(plate) as src, zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as dst:
+        for item in src.infolist():
+            if item.filename != CONFIG_ENTRY:
+                dst.writestr(item, src.read(item))
+        dst.writestr(CONFIG_ENTRY, config)
 
 
 def main(folder: Path = OUT / "3mf") -> int:

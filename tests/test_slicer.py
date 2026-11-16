@@ -83,6 +83,22 @@ def test_plate_as_designed_is_ok(tmp_path, fake_slicer, capsys):
     assert "; filament_colour = #ECE8DC" in config  # white, not the profile's orange
 
 
+def test_plate_saved_from_the_gui_gives_one_config(tmp_path, fake_slicer, capsys):
+    """A plate opened with File > Open project and saved with Ctrl+S has a config of its
+    own. The project replaces it: two entries with one name would leave the choice to the
+    zip reader."""
+    _export(tmp_path, {"tag": MAGNET})
+    with zipfile.ZipFile(tmp_path / "tag.3mf", "a") as z:
+        z.writestr(CONFIG_ENTRY, "; filament_colour = #000000\n")
+    assert main(tmp_path) == 0
+    assert _result(capsys).endswith("OK")
+    with zipfile.ZipFile(tmp_path / "projects" / "tag.3mf") as z:
+        names = z.namelist()
+        config = z.read(CONFIG_ENTRY).decode()
+    assert names.count(CONFIG_ENTRY) == 1 and len(names) == 3
+    assert "; filament_colour = #ECE8DC" in config
+
+
 def test_ceiling_that_does_not_print_as_a_bridge_is_reported(tmp_path, fake_slicer, capsys):
     """The support probe leaves bridges out: only this check fails if a ceiling the design
     lists (a pocket roof, the clip channel) does not print as a bridge."""
