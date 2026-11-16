@@ -45,7 +45,9 @@ def test_eyelet_has_a_4_mm_hole_in_a_2_mm_ring_above_the_charm(parts, c):
     # the ring is 2.0 mm all round: the hole's edge to the outside of the tab
     assert ring.exterior.distance(Point(x, y)) == pytest.approx(c.tab_r, abs=0.02)
     assert c.tab_r - r == pytest.approx(2.0)
-    assert y - r >= wear.layout(c).art.body.bounds[3] - 1e-6  # the hole lies above the body
+    # the hole lies above the body under the tab
+    under = wear.layout(c).art.body.intersection(box(x - c.tab_r, -1e3, x + c.tab_r, 1e3))
+    assert y - r >= under.bounds[3] - 1e-6
 
 
 # --- magnets ------------------------------------------------------------------------------
@@ -142,29 +144,36 @@ def _gaps_x(geom, y: float) -> list[float]:
 
 @pytest.mark.parametrize("c", CLIPS, ids=lambda c: c.name)
 def test_clip_clearances(parts, c):
+    """The tag has one bar, joined to the left wall; the moka that pours two, on its backing
+    plate: the top one joined to the left wall (SLIT), the bottom one to the right wall
+    (SLIT_WIDE)."""
     part = parts[c.name]
     lay = wear.layout(c)
-    _, _, ym0, ym1 = lay.clip.bar  # x0, x1, y0, y1
-    ym = (ym0 + ym1) / 2
-    # the bar on the bed: joined to one wall, a slit before the other
+    x0, x1 = lay.clip.channel
+    slits = [P.SLIT] if lay.clip.plate is None else [P.SLIT, P.SLIT_WIDE]
+    assert len(lay.clip.bars) == len(slits)
     floor = section(part, P.BAR_T / 2)
-    assert len(polygons(floor)) == 2
-    assert _gaps_x(floor, ym) == pytest.approx([P.SLIT], abs=0.01)
-    bar = floor.intersection(box(lay.clip.channel[0] + 0.5, -1e3, lay.clip.channel[1] - 0.5,
-                                 1e3))
-    _, by0, _, by1 = bar.bounds
-    assert by1 - by0 == pytest.approx(P.BAR_W, abs=0.01)
-    # the ribbon gap: nothing over the bar up to the underside of the tag at 2.8 mm
-    for z in (1.3, 2.0, 2.7):
-        cut = section(part, z)
-        assert len(polygons(cut)) == 2  # the two walls (the risers)
-        (channel,) = _gaps_x(cut, ym)
-        assert channel == pytest.approx(c.lanyard_w + 2, abs=0.01)
-        assert min(p.bounds[2] - p.bounds[0] for p in polygons(cut)) >= P.RISER_W
-        # the channel runs through the whole height of the tag: the ribbon goes in and out
-        x0, x1 = lay.clip.channel
-        assert cut.intersection(box(x0 + 0.01, -1e3, x1 - 0.01, 1e3)).area < 1e-6
-    assert len(polygons(section(part, 2.9))) == 1  # the tag bridges the channel
+    assert len(polygons(floor)) == 2  # each bar is joined to one wall only
+    near = box(x0 - P.RISER_W, -1e3, x1 + P.RISER_W, 1e3)  # the channel and its walls
+    for (bx0, bx1, ym0, ym1), slit, side in zip(lay.clip.bars, slits, ("left", "right")):
+        ym = (ym0 + ym1) / 2
+        # the bar on the bed: joined to one wall, a slit before the other
+        assert _gaps_x(floor.intersection(near), ym) == pytest.approx([slit], abs=0.01)
+        bar = floor.intersection(box(x0 + 0.5, ym0 - 0.5, x1 - 0.5, ym1 + 0.5))
+        _, by0, _, by1 = bar.bounds
+        assert by1 - by0 == pytest.approx(P.BAR_W, abs=0.01)
+        assert (bx1 == pytest.approx(x1 - slit)) if side == "left" else (
+            bx0 == pytest.approx(x0 + slit))
+        # the ribbon gap: nothing over the bar up to the underside of the charm at 2.8 mm
+        for z in (1.3, 2.0, 2.7):
+            cut = section(part, z)
+            assert len(polygons(cut)) == 2  # the two walls (the risers)
+            (channel,) = _gaps_x(cut.intersection(near), ym)
+            assert channel == pytest.approx(c.lanyard_w + 2, abs=0.01)
+            assert min(p.bounds[2] - p.bounds[0] for p in polygons(cut)) >= P.RISER_W
+            # the channel runs through the whole height of the charm: the ribbon goes in and out
+            assert cut.intersection(box(x0 + 0.01, -1e3, x1 - 0.01, 1e3)).area < 1e-6
+    assert len(polygons(section(part, 2.9))) == 1  # the charm bridges the channel
     assert P.CLIP_Z - P.BAR_T == pytest.approx(1.6)
 
 
@@ -184,7 +193,7 @@ def test_clip_gauge_has_the_tag_clip_with_four_slits(parts):
     dots on top."""
     c = CLIPS[0]
     lay = wear.layout(c)
-    _, _, ym0, ym1 = lay.clip.bar  # x0, x1, y0, y1
+    (_, _, ym0, ym1), = lay.clip.bars  # x0, x1, y0, y1
     ym = (ym0 + ym1) / 2
     _, ty0, _, ty1 = lay.bands[0].bounds
     gauge = parts[magnets.CLIP_GAUGE]
@@ -241,8 +250,8 @@ def test_clip_channel_follows_the_lanyard_width():
     c = charm("tag_two_lines_clip", lanyard_w=30.0)
     cut = section(wear.make_charm(c), 2.0)
     lay = wear.layout(c)
-    ym = (lay.clip.bar[2] + lay.clip.bar[3]) / 2
-    assert _gaps_x(cut, ym) == pytest.approx([32.0], abs=0.01)
+    (_, _, ym0, ym1), = lay.clip.bars
+    assert _gaps_x(cut, (ym0 + ym1) / 2) == pytest.approx([32.0], abs=0.01)
 
 
 def test_clip_lies_over_the_centre_of_mass():

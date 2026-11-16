@@ -11,7 +11,9 @@
 - The clip gauge (about 15 min) has one piece per slit in CLIP_GAUGE_SLITS, marked with 1
   to 4 dots. Each piece is the back of a clip tag: the same channel, bar, ribbon gap and
   ceiling, as tall as the tag, but without its colour bands. Try the ribbon in each one and
-  set `SLIT` in params.py to the narrowest slit that lets it in and keeps it in.
+  set `SLIT` in params.py to the narrowest slit that lets it in and keeps it in. A clip on a
+  backing plate (the moka that pours) has no gauge: its second slit, SLIT_WIDE, came from a
+  two-bar gauge printed once.
 
 They all print in one colour (`plate_colour`, white by default).
 """
@@ -105,8 +107,11 @@ def clip_gauge_layout(c: Charm) -> list[tuple[list[Slab], BaseGeometry]]:
     lay = layout(c)
     if lay.clip is None:
         raise ValueError(f"{c.name}: only a clip charm has a clip gauge")
+    if lay.clip.plate is not None:
+        raise ValueError(f"{c.name}: a clip on a backing plate has no clip gauge")
     _, y0, _, y1 = lay.bands[0].bounds
-    ym = (lay.clip.bar[2] + lay.clip.bar[3]) / 2
+    _, _, bar0, bar1 = lay.clip.bars[0]
+    ym = (bar0 + bar1) / 2
     cw = c.lanyard_w + P.CHANNEL_EXTRA
     w, h = cw + 2 * CLIP_GAUGE_WALL, y1 - y0
     n = len(P.CLIP_GAUGE_SLITS)
@@ -116,7 +121,7 @@ def clip_gauge_layout(c: Charm) -> list[tuple[list[Slab], BaseGeometry]]:
         x = (k % cols - (cols - 1) / 2) * (w + CLIP_GAUGE_GAP)
         dy = -(k // cols) * (h + CLIP_GAUGE_GAP)
         body = rounded_rect(x - w / 2, y0 + dy, x + w / 2, y1 + dy, CLIP_GAUGE_CORNER)
-        slabs, _ = clip_slabs(body, x, ym + dy, cw, slit, c.base_t)
+        slabs, _ = clip_slabs(body, x, cw, ((ym + dy, slit, "left"),), c.base_t)
         pieces.append((slabs, unary_union(_dots(x, (y0 + y1) / 2 + dy, k + 1))))
     return pieces
 
@@ -136,9 +141,10 @@ def extras(charms: list[Charm]) -> list[tuple[str, str, Callable[[], Part]]]:
     """(part name, filament, builder) of the single-colour parts that the charms need: the
     counter plate of every magnet charm (once per name: the first charm's), the pocket
     gauge once, in the first magnet charm's plate colour, and the clip gauge once, made for
-    the first clip charm and in its plate colour. export and render both use it."""
+    the first clip charm without a backing plate and in its plate colour. export and render
+    both use it."""
     magnets = [c for c in charms if c.wear == "magnet"]
-    clips = [c for c in charms if c.wear == "clip"]
+    clips = [c for c in charms if c.wear == "clip" and layout(c).clip.plate is None]
     out, seen = [], set()
     for c in magnets:
         if c.counter_name not in seen:

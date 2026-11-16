@@ -7,8 +7,8 @@
 
 One M600 serves the whole plate, so a plate holds `copies` of one charm with one way of
 wearing it: different variants have different band heights. A magnet charm brings its
-counter plate (the same number of copies) and the pocket gauge (once), a clip charm the
-clip gauge (once): they are plates in one colour. A charm plate carries all its colour
+counter plate (the same number of copies) and the pocket gauge (once), a clip charm
+without a backing plate the clip gauge (once): they are plates in one colour. A charm plate carries all its colour
 changes as PrusaSlicer metadata, so they are already set when you open the file.
 
 plan.json is written from the design: slicer.py checks the real G-code and the projects
@@ -74,7 +74,8 @@ def bodies(name: str) -> int:
 
 def jobs(charms: list[Charm]) -> dict[str, tuple[str, Job]]:
     """part name -> (plate name, job): every charm, the counter plate of every magnet charm,
-    the pocket gauge once if any charm has magnets, the clip gauge once if any has a clip."""
+    the pocket gauge once if any charm has magnets, the clip gauge once if any has a clip
+    without a backing plate (magnets.extras)."""
     out = {}
     for c in charms:
         out[c.name] = (charm_plate_name(c), (make_charm(c), c.bands[0], colour_changes(c),
@@ -220,8 +221,13 @@ def describe(c: Charm) -> str:
         parts.append(f"{len(lay.pockets)} x {c.pocket_d:g} mm pocket, counter plate "
                      f"{c.counter_name} ({c.plate_colour})")
     if lay.clip is not None:
-        parts.append(f"clip for a {c.lanyard_w:g} mm lanyard, channel x "
-                     f"{lay.clip.channel[0]:.1f}..{lay.clip.channel[1]:.1f} mm")
+        clip = (f"clip for a {c.lanyard_w:g} mm lanyard, channel x "
+                f"{lay.clip.channel[0]:.1f}..{lay.clip.channel[1]:.1f} mm")
+        if lay.clip.plate is not None:
+            x0, y0, x1, y1 = lay.clip.plate.bounds
+            clip += (f", backing plate {x1 - x0:.1f} x {y1 - y0:.1f} mm with two bars (slits "
+                     f"{P.SLIT:g} and {P.SLIT_WIDE:g} mm)")
+        parts.append(clip)
     if lay.tilt is not None:
         parts.append(f"hangs {lay.tilt:.2f}° off upright")
     return "; ".join(parts)

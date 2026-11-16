@@ -11,12 +11,14 @@ commands:
             checks, projects in out/3mf/projects
   render    PNG previews in out/render
 
-CHARM is a variant (tag_one_line_eyelet, tag_two_lines_clip, moka_magnet, ...) or a
-subject (tag, moka: all its variants). Without CHARM: every variant.
+CHARM is a variant (tag_one_line_eyelet, tag_two_lines_clip, moka_magnet,
+moka_pour_clip, ...) or a subject (tag, moka: all its variants). Without CHARM: every
+variant.
 
 options (for list, export and render):
   --wear eyelet|magnet|clip      only this way of wearing it
-  --layout one_line|two_lines    only this layout of the tag
+  --layout one_line|two_lines|pour
+                                 only this layout (the tag's lines, the moka that pours)
   --copies N                     copies of the charm on each plate (export; default 1)
   --bands A,B,...                filaments from the bed up, e.g. --bands white,red,green
   --set KEY=VALUE                any parameter of charms.Charm, e.g. --set magnet_clr=0.3
@@ -25,7 +27,8 @@ examples:
   uv run rh1charms list
   uv run rh1charms export tag --wear clip --copies 6
   uv run rh1charms export tag_two_lines_magnet --copies 4 --set magnet_clr=0.3
-  uv run rh1charms export moka --copies 12
+  uv run rh1charms export moka --copies 6
+  uv run rh1charms export moka --layout pour --wear clip --set text=consulting
   uv run rh1charms render tag --layout two_lines
   uv run rh1charms export tag --set text=consulting@roma:~$
 """
@@ -39,25 +42,32 @@ def _fail(message: str) -> None:
 
 
 def select(names: list[str], wear: str | None, layout: str | None) -> list[str]:
-    """The charm names that the arguments ask for. A subject gives all its default variants
-    (with --wear: that one, even one it does not have by default, like the moka's clip,
-    which then fails with the reason); --wear and --layout filter the variants named."""
-    from .charms import DEFAULT_WEARS, LAYOUTS, SUBJECTS, WEARS, parse_name
+    """The charm names that the arguments ask for. A subject gives all its default variants;
+    with --wear, that one in each of its layouts that has it by default, or, if none has
+    it, in all of them (like the plain moka's clip, which then fails with the reason).
+    --wear and --layout filter the variants named."""
+    from .charms import DEFAULT_WEARS, LAYOUTS_OF, SUBJECTS, WEARS, Charm, drawing, parse_name
 
     if wear is not None and wear not in WEARS:
         raise ValueError(f"unknown wear {wear!r}; choose from {', '.join(WEARS)}")
-    if layout is not None and layout not in LAYOUTS:
-        raise ValueError(f"unknown layout {layout!r}; choose from {', '.join(LAYOUTS)}")
+    known = [lay for s in SUBJECTS for lay in LAYOUTS_OF[s] if lay]
+    if layout is not None and layout not in known:
+        raise ValueError(f"unknown layout {layout!r}; choose from {', '.join(known)}")
     out = []
-    for name in names or [s for s in SUBJECTS if not (layout and s != "tag")]:
+    for name in names or [s for s in SUBJECTS if layout in (None, *LAYOUTS_OF[s])]:
         if name in SUBJECTS:
-            if layout and name != "tag":
-                raise ValueError(f"--layout is for the tag only, not the {name}")
-            layouts = ([layout] if layout else list(LAYOUTS)) if name == "tag" else [""]
-            wears = [wear] if (wear and names) else [
-                w for w in DEFAULT_WEARS[name] if wear in (None, w)]
-            out += [f"{name}_{lay}_{w}" if lay else f"{name}_{w}" for lay in layouts
-                    for w in wears]
+            if layout and layout not in LAYOUTS_OF[name]:
+                choices = ", ".join(lay for lay in LAYOUTS_OF[name] if lay)
+                raise ValueError(f"--layout {layout} is not a layout of the {name}; choose "
+                                 f"from {choices}")
+            layouts = [layout] if layout else list(LAYOUTS_OF[name])
+            if wear and names:
+                having = [lay for lay in layouts if wear in DEFAULT_WEARS[drawing(name, lay)]]
+                pairs = [(lay, wear) for lay in having or layouts]
+            else:
+                pairs = [(lay, w) for lay in layouts for w in DEFAULT_WEARS[drawing(name, lay)]
+                         if wear in (None, w)]
+            out += [Charm(name, w, lay).name for lay, w in pairs]
         else:
             _, lay, w = parse_name(name)
             if (wear and w != wear) or (layout and lay != layout):

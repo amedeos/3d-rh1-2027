@@ -51,9 +51,16 @@ def on_grid(z: float) -> bool:
     return abs(z - round(z / LAYER) * LAYER) < 1e-6
 
 
+# an automatic font size goes up 0.1 mm at a time, at most this often (artwork.py for the
+# bent text, wear.py for the band cleanup)
+SIZE_STEPS = 50
+
 # --- body and colour bands ------------------------------------------------------------
 BASE_T = layers(6)  # the body (band 0) of a charm: 1.2 mm
 BAND_T = layers(4)  # every further colour band: 0.8 mm
+# the red band (the letters) of the moka that pours: 1.2 mm, the owner's choice after a
+# test print (2026-11-16), so its letters stand out more
+POUR_RED_T = layers(6)
 
 # --- eyelet: a tab with a hole, above the centre of mass --------------------------------
 TAB_R = 4.0  # outer radius of the tab
@@ -87,10 +94,23 @@ RIBBON_T = 1.04  # ribbon thickness, measured on the 2026 RH1 lanyard
 # margin over RIBBON_T for the XY tolerance of the layers from 0.4 to 1.2 mm. In the
 # first layer the slit prints 0.4 mm wider (elefant_foot_compensation = 0.2 mm a side).
 SLIT = 1.1
+# A clip on a backing plate (the moka that pours) has two bars with their slits on
+# opposite sides: the top one keeps SLIT, the bottom one has SLIT_WIDE. With 1.1 mm on
+# both, the ribbon had to twist 90 degrees between the bars to go into the second one; the
+# owner chose 1.5 mm with a two-bar gauge (1.5, 2.0, 2.5 mm) on 2026-11-16. The 1.1 mm bar
+# alone holds the ribbon, as on the tag.
+SLIT_WIDE = 1.5
 CLIP_GAUGE_SLITS = (1.1, 1.3, 1.5, 1.7)  # the slits of the clip gauge, marked with 1 to 4 dots
 LANYARD_W = 20.0  # default ribbon width (a parameter)
 CHANNEL_EXTRA = 2.0  # the channel is this much wider than the ribbon
 OVERLAP = 0.05  # a joined piece reaches this far into the other, so the two fuse
+# The backing plate of a clip (the moka that pours, too narrow for the channel): exactly
+# the channel and its two RISER_W walls wide, PLATE_MARGIN above and below the charm where
+# it crosses the channel, with PLATE_CORNER corners. Its bars lie PLATE_EDGE from its top
+# and bottom edges.
+PLATE_MARGIN = 1.0
+PLATE_CORNER = 1.0
+PLATE_EDGE = 1.5
 
 # --- output -----------------------------------------------------------------------------
 OUT = Path("out")

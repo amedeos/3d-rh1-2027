@@ -42,15 +42,16 @@ def test_profile_assumptions():
 def test_band_order(c):
     """White, then red, then green (then black): dark over white covers well, and red right
     above white gives the raised letters clean red walls."""
-    assert c.bands == DEFAULT_BANDS[c.subject]
+    assert c.bands == DEFAULT_BANDS[c.drawing]
     assert c.bands[:3] == ("white", "red", "green")
     assert [f for _, f in wear.colour_changes(c)] == list(c.bands[1:])
 
 
 # the M600 heights of every default variant (print_z of the first layer of each band)
-M600 = {"eyelet": {"tag": [1.4, 2.2], "moka": [1.4, 2.2, 3.0]},
-        "magnet": {"tag": [3.0, 3.8], "moka": [3.0, 3.8, 4.6]},
-        "clip": {"tag": [4.2, 5.0]}}
+# (the moka that pours: a 1.2 mm red band)
+M600 = {"eyelet": {"tag": [1.4, 2.2], "moka": [1.4, 2.2, 3.0], "moka_pour": [1.4, 2.6]},
+        "magnet": {"tag": [3.0, 3.8], "moka": [3.0, 3.8, 4.6], "moka_pour": [3.0, 4.2]},
+        "clip": {"tag": [4.2, 5.0], "moka_pour": [4.2, 5.4]}}
 
 
 @pytest.mark.parametrize("c", CHARMS, ids=charm_id)
@@ -59,7 +60,7 @@ def test_colour_changes_come_before_each_band(c):
                                                  c.bands[1:]):
         assert P.on_grid(z0) and P.on_grid(z1)
         assert print_z == pytest.approx(z0 + P.LAYER) and colour == name
-    assert [z for z, _ in wear.colour_changes(c)] == pytest.approx(M600[c.wear][c.subject])
+    assert [z for z, _ in wear.colour_changes(c)] == pytest.approx(M600[c.wear][c.drawing])
 
 
 @pytest.mark.parametrize("c", CHARMS, ids=charm_id)

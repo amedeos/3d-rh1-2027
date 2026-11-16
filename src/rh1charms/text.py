@@ -42,7 +42,11 @@ if not FONT.is_file():  # never fall back to another font silently
 LINE_PITCH = 1.1  # em, from one baseline to the next (two_lines)
 FLAT_STEP = 0.005  # em: the longest segment of a flattened curve (0.04 mm at 8.3 mm)
 TOPO_CRUMB = 1e-5  # em2: smaller pieces and holes do not count for the topology
-SCAN_STEP = 0.005  # em: the radius scan of _narrowest, before the bisection
+# em: the radius scan of narrowest, before the bisection. A change can come and go between
+# two radii (a new hole that fills again, a stroke that splits and then vanishes), so the
+# step must stay under that range: the outer ring of '@' splits at r = 0.0274 em and is gone
+# by 0.030 em, and 0.005 missed it (tests/test_text.py checks that stroke)
+SCAN_STEP = 0.0025
 SCAN_TOP = 0.3  # em: no stroke or gap of a text is wider than 2 * this
 LAYOUTS = ("one_line", "two_lines")
 
@@ -173,12 +177,18 @@ def text_geometry(lines: tuple[str, ...], size: float) -> BaseGeometry:
     return affinity.scale(text_em(lines), size, size, origin=(0, 0))
 
 
+def _features(geom: BaseGeometry, crumb: float = TOPO_CRUMB) -> tuple[list, list]:
+    """The pieces of a geometry and its holes (as polygons), leaving out crumbs."""
+    pieces = [p for p in getattr(geom, "geoms", [geom])
+              if isinstance(p, Polygon) and p.area > crumb]
+    holes = [Polygon(h) for p in pieces for h in p.interiors if Polygon(h).area > crumb]
+    return pieces, holes
+
+
 def topology(geom: BaseGeometry, crumb: float = TOPO_CRUMB) -> tuple[int, int]:
     """(number of pieces, number of holes), leaving out crumbs."""
-    polys = [p for p in getattr(geom, "geoms", [geom])
-             if isinstance(p, Polygon) and p.area > crumb]
-    holes = sum(1 for p in polys for h in p.interiors if Polygon(h).area > crumb)
-    return len(polys), holes
+    pieces, holes = _features(geom, crumb)
+    return len(pieces), len(holes)
 
 
 def _morph(geom: BaseGeometry, r: float, op: str) -> BaseGeometry:
@@ -187,14 +197,54 @@ def _morph(geom: BaseGeometry, r: float, op: str) -> BaseGeometry:
     return geom.buffer(r, quad_segs=16).buffer(-r, quad_segs=16)
 
 
+def _inside(parts: list, regions: list) -> tuple[int, ...]:
+    """How many of `parts` lie in each of `regions`, and (last) in none of them. A part goes
+    to the first region that contains it: list nested regions smallest first."""
+    counts = [0] * (len(regions) + 1)
+    for part in parts:
+        point = part.representative_point()
+        counts[next((i for i, g in enumerate(regions) if g.contains(point)), -1)] += 1
+    return tuple(counts)
+
+
+def _signature(morphed: BaseGeometry, original: tuple[list, list], op: str) -> tuple:
+    """The topology of a closing or an opening, counted so that two changes cannot cancel
+    out. A closing only adds material: its holes lie in the original holes or, when a gap
+    closes, outside all of them (a new hole); so it counts the pieces, the holes in each
+    original hole and the new holes. A plain count missed a gap: in '~$ espresso', the two
+    'e' gaps close (+2 holes) where the two counters of '$' fill (-2). An opening only takes
+    material away: it counts the pieces in each original piece, and the holes."""
+    pieces, holes = _features(morphed)
+    if op == "close":
+        return len(pieces), _inside(holes, original[1])
+    return _inside(pieces, original[0]), len(holes)
+
+
+def same_features(geom: BaseGeometry, reference: BaseGeometry, crumb: float = TOPO_CRUMB) -> bool:
+    """geom has the pieces and holes of `reference`, one for one: each piece of the reference
+    holds one piece of geom, each hole one hole, and nothing lies anywhere else. Plain counts
+    can cancel out (a counter that fills and a gap that closes into a new hole)."""
+    ref = tuple(sorted(f, key=lambda g: g.area) for f in _features(reference, crumb))
+    pieces, holes = _features(geom, crumb)
+    return all(_inside(mine, theirs) == (1,) * len(theirs) + (0,)
+               for mine, theirs in zip((pieces, holes), ref))
+
+
 def narrowest(geom: BaseGeometry, op: str) -> float:
     """The width of the narrowest gap (op 'close') or the thinnest stroke (op 'open'): twice
-    the largest radius that keeps the topology. A scan from 0 finds the first radius that
-    changes it, then a bisection between the last good radius and that one."""
-    start = topology(geom)
+    the largest radius that keeps the topology (_signature). A scan from 0 finds the first
+    radius that changes it, then a bisection between the last good radius and that one."""
+    # smallest first, so that a hole inside a piece inside another hole (as in '®') counts
+    # under its own hole, not under the outer one (_inside)
+    original = tuple(sorted(f, key=lambda g: g.area) for f in _features(geom))
+    start = _signature(geom, original, op)
+
+    def keeps(r: float) -> bool:
+        return _signature(_morph(geom, r, op), original, op) == start
+
     lo, r = 0.0, SCAN_STEP
     while r <= SCAN_TOP + 1e-12:
-        if topology(_morph(geom, r, op)) != start:
+        if not keeps(r):
             break
         lo, r = r, r + SCAN_STEP
     else:
@@ -202,7 +252,7 @@ def narrowest(geom: BaseGeometry, op: str) -> float:
     hi = r
     for _ in range(24):
         mid = (lo + hi) / 2
-        lo, hi = (mid, hi) if topology(_morph(geom, mid, op)) == start else (lo, mid)
+        lo, hi = (mid, hi) if keeps(mid) else (lo, mid)
     return 2 * lo
 
 
@@ -243,18 +293,64 @@ def _where(value: float, per_char: dict[str, float]) -> str:
     return "in " + ", ".join(repr(ch) for ch in found) if found else "between two characters"
 
 
-@cache
-def limits(lines: tuple[str, ...]) -> Limits:
-    geom = text_em(lines)
-    chars = sorted({ch for line in lines for ch in line if not glyph(ch)[0].is_empty})
+def _limits_of(geom: BaseGeometry, text: str) -> Limits:
+    """The limits of a text drawn at one em (straight or bent), and where they are."""
+    chars = sorted({ch for ch in text if not glyph(ch)[0].is_empty})
     stroke, gap = narrowest(geom, "open"), narrowest(geom, "close")
     return Limits(stroke, gap, _where(stroke, {c: _glyph_limits(c)[0] for c in chars}),
                   _where(gap, {c: _glyph_limits(c)[1] for c in chars}))
 
 
-def size_problems(lines: tuple[str, ...], size: float) -> list[str]:
-    """What breaks the limits at a given font size (empty list: it prints)."""
-    lim = limits(lines)
+@cache
+def limits(lines: tuple[str, ...]) -> Limits:
+    return _limits_of(text_em(lines), "".join(lines))
+
+
+@cache
+def glyph_limits(text: str) -> Limits:
+    """The limits of the text's characters each on its own: a bent line keeps every glyph's
+    shape, so its limits are never wider than these (the gaps between glyphs aside)."""
+    chars = sorted({ch for ch in text if not glyph(ch)[0].is_empty})
+    strokes = {c: _glyph_limits(c)[0] for c in chars}
+    gaps = {c: _glyph_limits(c)[1] for c in chars}
+    stroke, gap = min(strokes.values()), min(gaps.values())
+    return Limits(stroke, gap, _where(stroke, strokes), _where(gap, gaps))
+
+
+def arc_text(line: str, size: float, radius: float, mid: float = 90.0,
+             centre: tuple[float, float] = (0.0, 0.0)) -> BaseGeometry:
+    """One line of text along a circle (mm), reading clockwise: left to right over the top.
+    Every glyph keeps its shape. The middle of its baseline lies on the circle of `radius`
+    around `centre`, one advance (0.6 em) from the next one along the circle, and the glyph
+    turns so that its baseline is tangent there. The middle of the text is at the angle
+    `mid` (degrees). On the outside of a circle the tops of the glyphs spread and the
+    descenders draw together: arc_limits() measures the gaps of the text as it is bent."""
+    text_em((line,))  # every character the same width
+    adv = glyph(line[0])[1]
+    pieces = []
+    for j, ch in enumerate(line):
+        g = glyph(ch)[0]
+        if g.is_empty:
+            continue
+        along = ((j + 0.5) - len(line) / 2) * adv * size  # from the middle of the text
+        p = affinity.scale(affinity.translate(g, -adv / 2, 0), size, size, origin=(0, 0))
+        p = affinity.rotate(affinity.translate(p, 0, radius),
+                            mid - math.degrees(along / radius) - 90, origin=(0, 0))
+        pieces.append(affinity.translate(p, *centre))
+    return unary_union(pieces)
+
+
+@cache
+def arc_limits(line: str, ratio: float) -> Limits:
+    """The limits of one line bent along a circle whose radius is `ratio` times the font
+    size (arc_text): the text is measured in em, as limits() does for a straight one."""
+    return _limits_of(arc_text(line, 1.0, ratio), line)
+
+
+def size_problems(lines: tuple[str, ...], size: float, lim: Limits | None = None) -> list[str]:
+    """What breaks the limits at a given font size (empty list: it prints). `lim`: the
+    limits to use (arc_limits for a bent line); by default those of the straight lines."""
+    lim = lim or limits(lines)
 
     def under(value: float, limit: float) -> str:
         # the value rounded down and the limit up, so that the two never look the same

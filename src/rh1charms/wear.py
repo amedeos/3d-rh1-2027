@@ -4,11 +4,15 @@
   upright (like the ornament tab of 3d-linux). Band 0 only: the drawing keeps its colours.
 - `magnet`: the body is 2.8 mm thick, with blind pockets on the bed side for 8 x 2 mm
   discs, under a 0.6 mm bridged roof. The tag gets two, a quarter of its width from each
-  end, so it cannot turn; the moka one, in the upper chamber, above the centre of mass.
-- `clip` (the tag only): a bar on the bed, a gap for the ribbon, then the tag from
-  z = 2.8 mm. Outside the channel, the body is solid down to the bed: its walls beside the
-  channel are the risers, and the only bridge is the ceiling of the channel. The bar joins
-  the left wall and stops SLIT short of the right one: the ribbon slides in through the slit.
+  end, so it cannot turn; the moka one, in the upper chamber, above the centre of mass. The
+  moka that pours gets two, in the upper chamber and in the boiler: its centre of mass lies
+  on the stream, too narrow for a pocket.
+- `clip`: a bar on the bed, a gap for the ribbon, then the charm from z = 2.8 mm. Outside
+  the channel, the body is solid down to the bed: its walls beside the channel are the
+  risers, and the only bridge is the ceiling of the channel. The bar joins the left wall and
+  stops SLIT short of the right one: the ribbon slides in through the slit. The plain moka
+  is too narrow for the channel. The moka that pours gets a backing plate, exactly the
+  channel and its walls wide, and two bars on it with their slits on opposite sides.
 
 Print pose: front face up, z = 0 on the bed. Band 0 is a stack of slabs (`slabs0`): the
 pockets or the channel are cut from the lower ones.
@@ -25,9 +29,10 @@ from shapely.ops import unary_union
 
 from . import artwork, relief
 from . import params as P
-from .charms import Charm
+from .artwork import rounded_rect
+from .charms import TEXTS, Charm
 from .relief import Slab, polygons
-from .text import limits, split_lines, topology
+from .text import same_features
 
 # The band cleanup (relief.colour_bands) repairs silently: it opens every band by
 # MIN_STROKE / 2 and fills specks. The letters must come through it unchanged but for their
@@ -35,14 +40,17 @@ from .text import limits, split_lines, topology
 # no gap filled larger than a speck, and only a sliver of the area lost.
 LOST_MAX = 0.15  # mm2: the largest piece of a letter the cleanup may take (a corner)
 LOST_SHARE = 0.015  # the most of the letters' area it may take in all
-TEXT_STEPS = 50  # an automatic font size goes up 0.1 mm at a time, at most this often
+# a lost piece thinner than twice this everywhere is a sliver shaved off an outline (long
+# bent outlines at a large size give one), not a stroke: only LOST_SHARE counts it
+SLIVER = 0.05
 
 
 @dataclass(frozen=True)
 class Clip:
     channel: tuple[float, float]  # x range of the channel
-    bar: tuple[float, float, float, float]  # x0, x1, y0, y1 of the bar on the bed
-    walls: BaseGeometry  # the footprint under the tag outside the channel (the risers)
+    bars: tuple[tuple[float, float, float, float], ...]  # x0, x1, y0, y1 of each bar, top first
+    walls: BaseGeometry  # the footprint under the charm outside the channel (the risers)
+    plate: BaseGeometry | None = None  # the backing plate, if the charm needs one
 
 
 @dataclass(frozen=True)
@@ -94,8 +102,8 @@ def hang_angle(pivot: tuple[float, float, float], centre: tuple[float, float]) -
 def band_z(c: Charm) -> list[tuple[float, float]]:
     """(z0, z1) of every band in the print pose."""
     z = [(0.0, c.base_t)]
-    for _ in c.bands[1:]:
-        z.append((z[-1][1], round(z[-1][1] + c.band_t, 6)))
+    for t in c.band_ts:
+        z.append((z[-1][1], round(z[-1][1] + t, 6)))
     return z
 
 
@@ -190,6 +198,15 @@ def _magnet(c: Charm, art, bands, z, upper) -> CharmLayout:
         pts = ((x0 + w / 4, ym), (x1 - w / 4, ym))
         slabs = _pocket_slabs(c, b0, pts) + upper
         com = relief.centre(slabs)
+    elif c.drawing == "moka_pour":  # two, in the middle of the upper chamber and the boiler
+        where = [art.parts[k] for k in ("chamber", "boiler")]
+        pts = tuple((p.centroid.x, p.centroid.y) for p in where)
+        for part, name, pt in zip(where, ("upper chamber", "boiler"), pts):
+            if not part.contains(Point(pt).buffer(r)):
+                raise ValueError(f"{c.name}: the {c.pocket_d:g} mm pocket does not fit inside "
+                                 f"the {name}")
+        slabs = _pocket_slabs(c, b0, pts) + upper
+        com = relief.centre(slabs)
     else:  # one, in the upper chamber, over the centre of mass
         chamber = art.parts["chamber"]
         y = chamber.centroid.y
@@ -236,22 +253,79 @@ def _strips(body: BaseGeometry, height: float, step: float = 0.2):
     return out
 
 
-def clip_slabs(b0: BaseGeometry, x: float, ym: float, cw: float, slit: float,
+Bar = tuple[float, float, str]  # (middle y, slit, the wall it joins: "left" | "right")
+
+
+def clip_slabs(b0: BaseGeometry, x: float, cw: float, bars: tuple[Bar, ...],
                top: float) -> tuple[list[Slab], Clip]:
-    """Band 0 of a clip, from the bed up: the floor (the walls and the bar), the walls beside
-    the channel, then the whole body up to `top`. The channel is `cw` wide, centred on x,
-    and runs across the whole body. The bar is BAR_W high, centred on ym: it joins the left
-    wall and stops `slit` short of the right one. The clip gauge uses it too."""
+    """Band 0 of a clip, from the bed up: the floor (the walls and the bars), the walls
+    beside the channel, then the whole body up to `top`. The channel is `cw` wide, centred
+    on x, and runs across the whole body. Each bar is BAR_W high: it joins one wall and
+    stops its slit short of the other. The clip gauge uses it too."""
     _, y0, _, y1 = b0.bounds
-    channel = box(x - cw / 2, y0 - 1, x + cw / 2, y1 + 1)
+    x0, x1 = x - cw / 2, x + cw / 2
+    channel = box(x0, y0 - 1, x1, y1 + 1)
     walls = relief.tidy(b0.difference(channel))
-    bar = (x - cw / 2 - P.OVERLAP, x + cw / 2 - slit, ym - P.BAR_W / 2, ym + P.BAR_W / 2)
-    floor = relief.tidy(unary_union([walls, box(bar[0], bar[2], bar[1], bar[3])]))
+    rects = tuple((x0 - P.OVERLAP, x1 - slit) if side == "left" else (x0 + slit, x1 + P.OVERLAP)
+                  for _, slit, side in bars)
+    rects = tuple((a, b, ym - P.BAR_W / 2, ym + P.BAR_W / 2)
+                  for (a, b), (ym, _, _) in zip(rects, bars))
+    floor = relief.tidy(unary_union([walls, *(box(a, c, b, d) for a, b, c, d in rects)]))
     slabs = [(floor, 0.0, P.BAR_T), (walls, P.BAR_T, P.CLIP_Z), (b0, P.CLIP_Z, top)]
-    return slabs, Clip((x - cw / 2, x + cw / 2), bar, walls)
+    return slabs, Clip((x0, x1), rects, walls)
+
+
+# the shortest backing plate: its two bars PLATE_EDGE from its edges, and BAR_W between
+# them, where the ribbon turns flat again
+PLATE_MIN_H = 2 * (P.PLATE_EDGE + P.BAR_W) + P.BAR_W
+
+
+def plate_for(body: BaseGeometry, x: float, need: float) -> Polygon:
+    """The backing plate of a clip over x: `need` wide, PLATE_MARGIN above and below the body
+    where it crosses that strip, and at least PLATE_MIN_H tall (centred on the strip)."""
+    strip = body.intersection(box(x - need / 2, -1e4, x + need / 2, 1e4))
+    if strip.is_empty:
+        raise ValueError("nothing of the charm lies under the backing plate")
+    _, y0, _, y1 = strip.bounds
+    y0, y1 = y0 - P.PLATE_MARGIN, y1 + P.PLATE_MARGIN
+    grow = max(0.0, PLATE_MIN_H - (y1 - y0)) / 2
+    return rounded_rect(x - need / 2, y0 - grow, x + need / 2, y1 + grow, P.PLATE_CORNER)
+
+
+def _plate_clip(c: Charm, art, bands, z, upper) -> CharmLayout:
+    """A clip on a backing plate (plate_for). The plate and the channel move together: the
+    plate is exactly the channel and its walls wide. Two bars, PLATE_EDGE from the top and
+    the bottom of the plate: the top one joins the left wall (SLIT), the bottom one the right
+    wall (SLIT_WIDE). The ribbon goes into the top bar first."""
+    cw = c.lanyard_w + P.CHANNEL_EXTRA
+    need = cw + 2 * P.RISER_W
+
+    def place(x: float):
+        try:
+            plate = plate_for(art.body, x, need)
+        except ValueError as e:
+            raise ValueError(f"{c.name}: {e}") from None
+        # band 0 as colour_bands makes it, of the body with the plate, and as moka() fills the
+        # body: the holes under WINDOW_MIN where the plate meets the outline go
+        joined = polygons(relief.opening(unary_union([art.body, plate]), P.MIN_STROKE / 2))
+        if len(joined) != 1:
+            raise ValueError(f"{c.name}: the backing plate does not join the body")
+        b0 = Polygon(joined[0].exterior, [h for h in joined[0].interiors
+                                          if Polygon(h).area >= artwork.WINDOW_MIN])
+        _, py0, _, py1 = plate.bounds
+        bars = ((py1 - P.PLATE_EDGE - P.BAR_W / 2, P.SLIT, "left"),
+                (py0 + P.PLATE_EDGE + P.BAR_W / 2, P.SLIT_WIDE, "right"))
+        slabs0, clip = clip_slabs(b0, x, cw, bars, c.base_t)
+        return slabs0 + upper, (b0, replace(clip, plate=plate))
+
+    start = relief.centre([(bands[0], *z[0]), *upper])[0]
+    _, slabs, com, (b0, clip) = _settle(c.name, "the clip", start, place)
+    return CharmLayout(art, [b0, *bands[1:]], z, tuple(slabs[:3]), None, (), clip, com)
 
 
 def _clip(c: Charm, art, bands, z, upper) -> CharmLayout:
+    if art.plate:
+        return _plate_clip(c, art, bands, z, upper)
     cw = c.lanyard_w + P.CHANNEL_EXTRA
     need = cw + 2 * P.RISER_W
     b0 = bands[0]
@@ -272,7 +346,7 @@ def _clip(c: Charm, art, bands, z, upper) -> CharmLayout:
         return min(max(x, lo + need / 2), hi - need / 2)
 
     def place(x: float):
-        slabs0, clip = clip_slabs(b0, x, ym, cw, P.SLIT, c.base_t)
+        slabs0, clip = clip_slabs(b0, x, cw, ((ym, P.SLIT, "left"),), c.base_t)
         return slabs0 + upper, clip
 
     start = clamp(relief.centre([(b0, *z[0]), *upper])[0])
@@ -287,12 +361,14 @@ def _clip(c: Charm, art, bands, z, upper) -> CharmLayout:
 def text_damage(art: artwork.Artwork, band: BaseGeometry) -> str | None:
     """How the band cleanup changed the letters (None: only their corners). `band` is the
     band of the text's colour."""
-    inner = art.parts["middle"].buffer(-0.5)  # clear of the edges of the end bands
-    raised, raw = band.intersection(inner), art.text
-    if topology(raised, 1e-3) != topology(raw, 1e-3):
+    # where only the letters are: the tag's white middle clear of the end bands, the moka's
+    # stream clear of the pot (the spout, the lid, the knob and the handle are red too)
+    raised, raw = band.intersection(art.parts["text_zone"]), art.text
+    if not same_features(raised, raw, 1e-3):
         return "it changes the pieces or holes of the letters"
     lost = raw.difference(raised)
-    largest = max((p.area for p in polygons(lost)), default=0.0)
+    largest = max((p.area for p in polygons(lost) if not p.buffer(-SLIVER).is_empty),
+                  default=0.0)
     if largest > LOST_MAX:
         return f"it removes {largest:.2f} mm2 of a letter (a stroke thinner than a line)"
     if lost.area > LOST_SHARE * raw.area:
@@ -304,18 +380,26 @@ def text_damage(art: artwork.Artwork, band: BaseGeometry) -> str | None:
 
 
 def _artwork_and_bands(c: Charm) -> tuple[artwork.Artwork, list[BaseGeometry]]:
-    """The drawing and its printable bands. For the tag, the letters must come through the
-    band cleanup (text_damage): an automatic font size goes up 0.1 mm at a time until they
-    do (a stroke that keeps the topology when it vanishes, such as the foot of an L, can need
-    more than the text's own limits); a forced font_size that fails is an error."""
-    if c.subject != "tag":
+    """The drawing and its printable bands. With a text (the tag, the moka that pours), the
+    letters must come through the band cleanup (text_damage): an automatic font size goes up
+    0.1 mm at a time until they do (a stroke that keeps the topology when it vanishes, such
+    as the foot of an L, can need more than the text's own limits), past a size too small for
+    a bent line (a short stream bends tighter as the letters grow); a forced font_size that
+    fails is an error."""
+    if c.drawing not in TEXTS:  # the plain moka (it ignores a text)
         art = artwork.make(c)
         return art, relief.colour_bands(c.name, c.bands, art.body, art.regions)
     text_band = c.bands.index("red")
-    start = c.font_size or limits(split_lines(c.text, c.layout)).size
-    for k in range(1 if c.font_size else TEXT_STEPS):
+    start = c.font_size or artwork.auto_size(c)[0]
+    for k in range(1 if c.font_size else P.SIZE_STEPS):
         size = c.font_size or round(start + 0.1 * k, 1)  # a forced size stays as it is
-        art = artwork.tag(c, size)
+        try:
+            art = artwork.make(c, size)
+        except artwork.TooSmall as e:
+            if c.font_size:
+                raise
+            why = str(e).partition(": ")[2]
+            continue
         bands = relief.colour_bands(c.name, c.bands, art.body, art.regions)
         why = text_damage(art, bands[text_band])
         if why is None:
@@ -326,8 +410,8 @@ def _artwork_and_bands(c: Charm) -> tuple[artwork.Artwork, list[BaseGeometry]]:
         if c.font_size:
             raise ValueError(f"{c.name}: at font_size {size:g} mm the band cleanup changes the "
                              f"letters: {why}. Make font_size larger")
-    raise ValueError(f"{c.name}: from {start:g} to {size:g} mm, the band cleanup still changes "
-                     f"the letters ({why}): set a larger font_size")
+    raise ValueError(f"{c.name}: no automatic font size from {start:g} to {size:g} mm prints the "
+                     f"letters (at {size:g} mm: {why}); try another text or force a font_size")
 
 
 @cache

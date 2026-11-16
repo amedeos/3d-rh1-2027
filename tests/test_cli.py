@@ -59,24 +59,32 @@ def test_list_shows_every_variant_with_its_font_size(capsys):
     assert "font 8.3 mm (smallest: the gap in '@')" in lines["tag_one_line_eyelet"]
     assert "M600 at 4.20 red, 5.00 green" in lines["tag_two_lines_clip"]
     assert "counter plate moka_counter" in lines["moka_magnet"]
+    assert ("font 10 mm (smallest: 6.8 mm, the gap in 'e'; the stream takes 10 mm)"
+            in lines["moka_pour_eyelet"])
+    assert "2 x 8.2 mm pocket, counter plate moka_pour_counter" in lines["moka_pour_magnet"]
+    assert "M600 at 4.20 red, 5.40 green" in lines["moka_pour_clip"]
+    assert "backing plate 26.8 x" in lines["moka_pour_clip"]
 
 
 @pytest.mark.parametrize("names, wear_, layout, expected", [
     ([], None, None, list(VARIANTS)),
-    (["moka"], None, None, ["moka_eyelet", "moka_magnet"]),
-    ([], "clip", None, ["tag_one_line_clip", "tag_two_lines_clip"]),
-    (["moka"], "clip", None, ["moka_clip"]),  # asked for by name: it fails with the reason
+    (["moka"], None, None, ["moka_eyelet", "moka_magnet", "moka_pour_eyelet",
+                            "moka_pour_magnet", "moka_pour_clip"]),
+    ([], "clip", None, ["tag_one_line_clip", "tag_two_lines_clip", "moka_pour_clip"]),
+    (["moka"], "clip", None, ["moka_pour_clip"]),  # the layouts that have a clip
+    (["moka_clip"], None, None, ["moka_clip"]),  # asked for by name: it fails with the reason
     (["tag"], None, "two_lines", ["tag_two_lines_eyelet", "tag_two_lines_magnet",
                                   "tag_two_lines_clip"]),
+    ([], None, "pour", ["moka_pour_eyelet", "moka_pour_magnet", "moka_pour_clip"]),
     (["tag_one_line_magnet", "moka", "tag"], "magnet", None,
-     ["tag_one_line_magnet", "moka_magnet", "tag_two_lines_magnet"]),
+     ["tag_one_line_magnet", "moka_magnet", "moka_pour_magnet", "tag_two_lines_magnet"]),
 ])
 def test_selection(names, wear_, layout, expected):
     assert rh1charms.select(names, wear_, layout) == expected
 
 
 @pytest.mark.parametrize("argv, message", [
-    (["export", "moka", "--wear", "clip"], "too narrow for a lanyard clip"),
+    (["export", "moka_clip"], "too narrow for a lanyard clip"),
     (["render", "moka_clip"], "too narrow for a lanyard clip"),
     (["export", "tag_one_line_eyelet", "--set", "font_size=8"],
      "font_size 8 mm is too small: the narrowest gap (in '@') is 0.438 mm"),
@@ -84,7 +92,14 @@ def test_selection(names, wear_, layout, expected):
     (["export", "tag", "--copies", "two"], "--copies needs a whole number"),
     (["export", "tag", "--set", "band_t=0.7"], "layers"),
     (["export", "--wear", "hook"], "unknown wear"),
-    (["export", "moka", "--layout", "two_lines"], "--layout is for the tag only"),
+    (["export", "moka", "--layout", "two_lines"], "--layout two_lines is not a layout of the moka"),
+    (["export", "tag", "--layout", "pour"], "--layout pour is not a layout of the tag"),
+    (["list", "moka_pour_eyelet", "--bands", "white,red,green,black"], "does not use black"),
+    (["export", "moka_pour_eyelet", "--set", "text=one\\ntwo"], "one line"),
+    (["export", "moka_pour_eyelet", "--set", "text="], "the text is empty"),
+    (["list", "moka_pour", "--set", "red_t=1.1"], "unknown charm"),
+    (["list", "moka_pour_clip", "--set", "red_t=1.1"], "red_t = 1.1 is not a whole number"),
+    (["list", "moka_pour_clip", "--bands", "red,white,green"], "red cannot print the body"),
     (["export", "tag", "--set", "text=caffè ☕"], "no glyph"),
     (["export", "tag", "--set", "nope=1"], "unknown parameter"),
     (["export", "teapot"], "unknown charm"),

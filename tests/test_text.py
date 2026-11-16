@@ -59,6 +59,9 @@ def test_smallest_font_size_is_set_by_the_gap_in_the_at_sign(layout):
     assert lim.bound == "the gap in '@'"
     assert lim.gap == pytest.approx(0.0547, abs=5e-4)
     assert lim.stroke * lim.size > P.MIN_STROKE  # the strokes are fine at that size
+    # the outer ring of '@' splits at r = 0.0274 em and is gone by 0.030 em: a coarser scan
+    # misses it and reports 0.076 em (text.SCAN_STEP)
+    assert lim.stroke == pytest.approx(0.0547, abs=5e-4) and lim.stroke_at == "in '@'"
 
 
 @pytest.mark.parametrize("layout", LAYOUTS)
@@ -81,17 +84,16 @@ def _raster_topology(img: np.ndarray) -> tuple[int, int]:
                  for x in (img, ~img))
 
 
-@pytest.mark.parametrize("layout", LAYOUTS)
-def test_raster_check_agrees_with_the_font_size(layout):
+def _raster_agrees(lines: tuple[str, ...]) -> None:
     """An independent measure, on pixels: at the chosen size, a closing a little under
     MIN_GAP and an opening a little under MIN_STROKE keep every piece and hole; at 0.9 times
     the size, the MIN_GAP closing joins something. (The rasteriser fills the edge pixels, so
     gaps look about a pixel narrower: 50 px/mm and the 10 % margins absorb that.)"""
     px = 50.0
-    size = limits(LINES[layout]).size
+    size = limits(lines).size
     for s, r_gap, keeps in ((size, 0.9 * P.MIN_GAP / 2, True),
                             (0.9 * size, P.MIN_GAP / 2, False)):
-        geom = text.text_geometry(LINES[layout], s)
+        geom = text.text_geometry(lines, s)
         m = np.array(mask(geom, geom.bounds, px, pad=30), dtype=bool)
         start = _raster_topology(m)
         closed = ndimage.binary_closing(m, structure=_disk(round(r_gap * px)))
@@ -99,6 +101,36 @@ def test_raster_check_agrees_with_the_font_size(layout):
         if keeps:
             opened = ndimage.binary_opening(m, structure=_disk(round(0.9 * P.MIN_STROKE / 2 * px)))
             assert _raster_topology(opened) == start
+
+
+@pytest.mark.parametrize("layout", LAYOUTS)
+def test_raster_check_agrees_with_the_font_size(layout):
+    _raster_agrees(LINES[layout])
+
+
+# Texts for the moka that pours. With plain counts of pieces and holes, a gap could hide: in
+# '~$ espresso' the two 'e' gaps close (+2 holes) at the radius where the two counters of
+# '$' fill (-2), and 'consulting' came out at 5.5 mm instead of 6.4 (the gap in 's').
+OTHER_TEXTS = ["~$ espresso", "consulting", "services", "sudo espresso", "kill -9 sleep"]
+
+
+def test_a_closing_gap_is_not_hidden_by_a_counter_that_fills():
+    assert limits(("~$ espresso",)).size == limits(("espresso",)).size == 6.8
+    assert limits(("consulting",)).size == 6.4
+
+
+@pytest.mark.parametrize("t", [DEFAULT_TEXT, *OTHER_TEXTS])
+def test_a_text_is_never_wider_than_its_narrowest_glyph(t):
+    """A text has every gap and stroke of its characters, and the gaps between them."""
+    lim = limits((t,))
+    chars = {ch for ch in t if not glyph(ch)[0].is_empty}
+    assert lim.gap <= min(text._glyph_limits(ch)[1] for ch in chars) * (1 + 1e-6)
+    assert lim.stroke <= min(text._glyph_limits(ch)[0] for ch in chars) * (1 + 1e-6)
+
+
+@pytest.mark.parametrize("t", OTHER_TEXTS)
+def test_raster_check_agrees_with_other_texts(t):
+    _raster_agrees((t,))
 
 
 def test_forced_font_size_below_the_limit_is_an_error():
