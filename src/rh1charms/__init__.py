@@ -17,8 +17,9 @@ variant.
 
 options (for list, export and render):
   --wear eyelet|magnet|clip      only this way of wearing it
-  --layout one_line|two_lines|pour
-                                 only this layout (the tag's lines, the moka that pours)
+  --layout one_line|two_lines|pour|pour_rh1
+                                 only this layout (the tag's lines, the moka that pours,
+                                 and with RH1 and 2027 on its clip plate)
   --copies N                     copies of the charm on each plate (export; default 1)
   --bands A,B,...                filaments from the bed up, e.g. --bands white,red,green
   --set KEY=VALUE                any parameter of charms.Charm, e.g. --set magnet_clr=0.3
@@ -46,7 +47,7 @@ def select(names: list[str], wear: str | None, layout: str | None) -> list[str]:
     with --wear, that one in each of its layouts that has it by default, or, if none has
     it, in all of them (like the plain moka's clip, which then fails with the reason).
     --wear and --layout filter the variants named."""
-    from .charms import DEFAULT_WEARS, LAYOUTS_OF, SUBJECTS, WEARS, Charm, drawing, parse_name
+    from .charms import LAYOUTS_OF, SUBJECTS, WEARS, Charm, default_wears, parse_name
 
     if wear is not None and wear not in WEARS:
         raise ValueError(f"unknown wear {wear!r}; choose from {', '.join(WEARS)}")
@@ -62,10 +63,10 @@ def select(names: list[str], wear: str | None, layout: str | None) -> list[str]:
                                  f"from {choices}")
             layouts = [layout] if layout else list(LAYOUTS_OF[name])
             if wear and names:
-                having = [lay for lay in layouts if wear in DEFAULT_WEARS[drawing(name, lay)]]
+                having = [lay for lay in layouts if wear in default_wears(name, lay)]
                 pairs = [(lay, wear) for lay in having or layouts]
             else:
-                pairs = [(lay, w) for lay in layouts for w in DEFAULT_WEARS[drawing(name, lay)]
+                pairs = [(lay, w) for lay in layouts for w in default_wears(name, lay)
                          if wear in (None, w)]
             out += [Charm(name, w, lay).name for lay, w in pairs]
         else:

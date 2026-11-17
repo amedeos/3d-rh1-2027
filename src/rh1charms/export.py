@@ -228,6 +228,9 @@ def describe(c: Charm) -> str:
             x0, y0, x1, y1 = lay.clip.plate.bounds
             clip += (f", backing plate {x1 - x0:.1f} x {y1 - y0:.1f} mm with two bars (slits "
                      f"{P.SLIT:g} and {P.SLIT_WIDE:g} mm)")
+            if lay.clip.letters:
+                texts = " and ".join(f"{t} ({colour})" for t, colour, _ in lay.clip.letters)
+                clip += f", {texts} on it at {lay.clip.font:g} mm"
         parts.append(clip)
     if lay.tilt is not None:
         parts.append(f"hangs {lay.tilt:.2f}° off upright")

@@ -8,10 +8,11 @@ Two subjects (`tag`, `moka`) and three ways to wear them (`wear`): an `eyelet` a
 centre of mass, `magnet` pockets on the bed side (with a counter plate worn inside the
 shirt), or a lanyard `clip` on the back. The tag has two layouts: `one_line` and
 `two_lines`. The moka has none, or `pour`: the moka that pours, with a text along the stream
-(`moka_pour_eyelet`, ...). Each subject and layout is a drawing (`drawing()`) with its own
-colours, bands and ways to wear it. `VARIANTS` holds every default combination; `charm()`
-makes any other one (the plain moka with a clip is a clear error from wear.py: it is too
-narrow; the moka that pours gets a backing plate).
+(`moka_pour_eyelet`, ...), or `pour_rh1`: the same, with a clip only, and `RH1` and `2027` on
+its backing plate (`moka_pour_rh1_clip`). Each subject and layout is a drawing (`drawing()`)
+with its own colours, bands and ways to wear it (`default_wears()`). `VARIANTS` holds every
+default combination; `charm()` makes any other one (the plain moka with a clip is a clear
+error from wear.py: it is too narrow; the moka that pours gets a backing plate).
 """
 
 import math
@@ -23,7 +24,13 @@ from .text import LAYOUTS
 
 SUBJECTS = ("tag", "moka")
 WEARS = ("eyelet", "magnet", "clip")
-LAYOUTS_OF = {"tag": LAYOUTS, "moka": ("", "pour")}  # "" = the moka without a layout
+POUR_LAYOUTS = ("pour", "pour_rh1")  # the moka that pours: the same drawing
+LAYOUTS_OF = {"tag": LAYOUTS, "moka": ("", *POUR_LAYOUTS)}  # "" = the moka without a layout
+# the texts on the backing plate of the clip (top right, bottom centre), by layout: the
+# owner's choice (2026-11-17). Other layouts have none and ignore plate_top and plate_bottom.
+PLATE_TEXTS = {"pour_rh1": ("RH1", "2027")}
+PLATE_COLOURS = ("red", "green")  # the filaments of the top and the bottom text
+LAYOUT_WEARS = {"pour_rh1": ("clip",)}  # the plate exists only with a clip
 DEFAULT_TEXT = "consulting@italy:~$"
 POUR_TEXT = "consulting"  # the text of the moka that pours (the owner's choice, 2026-11-17)
 # the drawings with a text, in raised red letters (red cannot print their body), and their
@@ -40,14 +47,19 @@ COLOURS = DEFAULT_BANDS
 
 def drawing(subject: str, layout: str) -> str:
     """The drawing of a subject and layout: tag, moka, or moka_pour (the moka that pours)."""
-    return "moka_pour" if (subject, layout) == ("moka", "pour") else subject
+    return "moka_pour" if subject == "moka" and layout in POUR_LAYOUTS else subject
+
+
+def default_wears(subject: str, layout: str) -> tuple[str, ...]:
+    """The ways to wear a subject and layout that VARIANTS holds."""
+    return LAYOUT_WEARS.get(layout, DEFAULT_WEARS[drawing(subject, layout)])
 
 
 @dataclass(frozen=True)
 class Charm:
     subject: str  # tag | moka
     wear: str = "eyelet"  # eyelet | magnet | clip
-    layout: str = ""  # tag: one_line | two_lines ("" = one_line); moka: "" | pour
+    layout: str = ""  # tag: one_line | two_lines ("" = one_line); moka: "" | pour | pour_rh1
     # tag: two_lines splits at a line break or before the '@' (None = DEFAULT_TEXT); the
     # moka that pours: one line along the stream (None = POUR_TEXT); the plain moka has no
     # text and ignores one (so a --set text for every charm works)
@@ -63,6 +75,15 @@ class Charm:
     hole_d: float = P.HOLE_D  # eyelet hole
     tab_r: float = P.TAB_R  # outer radius of the eyelet tab
     plate_colour: str = "white"  # filament of the counter plate and the gauges
+    # the texts on the clip's backing plate, top right (red) and bottom centre (green), one
+    # line each; None = the layout's (PLATE_TEXTS), "" = none. Only the layouts in
+    # PLATE_TEXTS have them: the others ignore them and keep None (so a --set for every
+    # charm works, and a new layout still gets its own)
+    plate_top: str | None = None
+    plate_bottom: str | None = None
+    # their em size (mm); 0 = automatic: the largest at which the top text fits its corner,
+    # at most artwork.POUR_FONT (wear.py)
+    plate_font: float = 0.0
 
     def __post_init__(self):
         if self.subject == "tag" and not self.layout:
@@ -71,6 +92,15 @@ class Charm:
             object.__setattr__(self, "bands", DEFAULT_BANDS[self.drawing])
         if self.text is None and self.drawing in TEXTS:
             object.__setattr__(self, "text", TEXTS[self.drawing])
+        if self.layout in PLATE_TEXTS:
+            top, bottom = PLATE_TEXTS[self.layout]
+            if self.plate_top is None:
+                object.__setattr__(self, "plate_top", top)
+            if self.plate_bottom is None:
+                object.__setattr__(self, "plate_bottom", bottom)
+        else:  # ignored: the same charm as without them
+            for name, value in (("plate_top", None), ("plate_bottom", None), ("plate_font", 0.0)):
+                object.__setattr__(self, name, value)
 
     @property
     def drawing(self) -> str:
@@ -130,6 +160,24 @@ class Charm:
             raise ValueError(f"{self.name}: the text is empty")
         if self.drawing == "moka_pour" and "\n" in self.text:
             raise ValueError(f"{self.name}: the moka's text is one line, without a line break")
+        if self.layout in LAYOUT_WEARS and self.wear not in LAYOUT_WEARS[self.layout]:
+            raise ValueError(f"{self.name}: the {self.layout} layout puts its texts on the backing "
+                             f"plate of the clip: wear it with a "
+                             f"{' or '.join(LAYOUT_WEARS[self.layout])}")
+        for t, colour in zip((self.plate_top, self.plate_bottom), PLATE_COLOURS):
+            if not t:
+                continue
+            if not t.strip():
+                raise ValueError(f"{self.name}: the text {t!r} on the plate has no letters: "
+                                 "leave it empty for none")
+            if "\n" in t:
+                raise ValueError(f"{self.name}: a text on the plate is one line, without a line "
+                                 "break")
+            if self.bands[0] == colour:
+                raise ValueError(f"{self.name}: {t!r} on the plate is {colour}, so {colour} "
+                                 "cannot print the body (bands[0]): the letters would not rise")
+        if self.plate_font < 0:
+            raise ValueError(f"{self.name}: plate_font must not be negative (0 = automatic)")
         unknown = sorted({b for b in (*self.bands, self.plate_colour) if b not in FILAMENTS})
         if unknown:
             raise ValueError(f"{self.name}: unknown filament(s) {unknown}; choose from "
@@ -175,7 +223,7 @@ def _variants() -> dict[str, Charm]:
     out = {}
     for subject in SUBJECTS:
         for layout in LAYOUTS_OF[subject]:
-            for wear in DEFAULT_WEARS[drawing(subject, layout)]:
+            for wear in default_wears(subject, layout):
                 c = Charm(subject, wear, layout)
                 out[c.name] = c
     return out
@@ -186,8 +234,9 @@ VARIANTS = _variants()
 
 def parse_name(name: str) -> tuple[str, str, str]:
     """'tag_two_lines_clip' -> ('tag', 'two_lines', 'clip'); 'moka_eyelet' -> ('moka', '',
-    'eyelet'); 'moka_pour_clip' -> ('moka', 'pour', 'clip'). Any combination parses: the plain
-    moka with a clip fails later, with the reason."""
+    'eyelet'); 'moka_pour_clip' -> ('moka', 'pour', 'clip'); 'moka_pour_rh1_clip' -> ('moka',
+    'pour_rh1', 'clip'). Any combination parses: the plain moka with a clip fails later, with
+    the reason."""
     subject, _, rest = name.partition("_")
     layout, _, wear = rest.rpartition("_")
     if subject not in SUBJECTS or wear not in WEARS or layout not in LAYOUTS_OF[subject]:
@@ -218,7 +267,7 @@ def parse_value(c: Charm, key: str, text: str):
         if not bands:  # () would mean "the default" and be ignored without a word
             raise ValueError("bands needs at least one filament, e.g. white,red,green")
         return bands
-    if key == "text":  # a literal \n on the command line is the line break
+    if key in ("text", "plate_top", "plate_bottom"):  # a literal \n is the line break
         return text.replace("\\n", "\n")
     if isinstance(current, float):
         try:

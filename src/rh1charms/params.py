@@ -111,6 +111,8 @@ OVERLAP = 0.05  # a joined piece reaches this far into the other, so the two fus
 PLATE_MARGIN = 1.0
 PLATE_CORNER = 1.0
 PLATE_EDGE = 1.5
+# the texts on the plate (moka_pour_rh1_clip) <-> its edges
+PLATE_TEXT_MARGIN = 1.2
 
 # --- output -----------------------------------------------------------------------------
 OUT = Path("out")

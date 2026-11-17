@@ -63,6 +63,7 @@ def test_list_shows_every_variant_with_its_font_size(capsys):
             in lines["moka_pour_eyelet"])
     assert "2 x 8.2 mm pocket, counter plate moka_pour_counter" in lines["moka_pour_magnet"]
     assert "M600 at 4.20 red, 5.40 green" in lines["moka_pour_clip"]
+    assert "RH1 (red) and 2027 (green) on it at" in lines["moka_pour_rh1_clip"]
     assert "backing plate 26.8 x" in lines["moka_pour_clip"]
 
 
@@ -76,9 +77,12 @@ def test_an_override_that_makes_two_charms_one_lists_it_once(capsys):
 @pytest.mark.parametrize("names, wear_, layout, expected", [
     ([], None, None, list(VARIANTS)),
     (["moka"], None, None, ["moka_eyelet", "moka_magnet", "moka_pour_eyelet",
-                            "moka_pour_magnet", "moka_pour_clip"]),
-    ([], "clip", None, ["tag_one_line_clip", "tag_two_lines_clip", "moka_pour_clip"]),
-    (["moka"], "clip", None, ["moka_pour_clip"]),  # the layouts that have a clip
+                            "moka_pour_magnet", "moka_pour_clip", "moka_pour_rh1_clip"]),
+    ([], "clip", None, ["tag_one_line_clip", "tag_two_lines_clip", "moka_pour_clip",
+                        "moka_pour_rh1_clip"]),
+    (["moka"], "clip", None, ["moka_pour_clip", "moka_pour_rh1_clip"]),  # the layouts with it
+    (["moka"], "eyelet", "pour_rh1", ["moka_pour_rh1_eyelet"]),  # none has it: it fails later
+    ([], None, "pour_rh1", ["moka_pour_rh1_clip"]),
     (["moka_clip"], None, None, ["moka_clip"]),  # asked for by name: it fails with the reason
     (["tag"], None, "two_lines", ["tag_two_lines_eyelet", "tag_two_lines_magnet",
                                   "tag_two_lines_clip"]),

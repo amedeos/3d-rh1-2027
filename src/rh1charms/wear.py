@@ -12,7 +12,9 @@
   risers, and the only bridge is the ceiling of the channel. The bar joins the left wall and
   stops SLIT short of the right one: the ribbon slides in through the slit. The plain moka
   is too narrow for the channel. The moka that pours gets a backing plate, exactly the
-  channel and its walls wide, and two bars on it with their slits on opposite sides.
+  channel and its walls wide, and two bars on it with their slits on opposite sides. On
+  moka_pour_rh1_clip the plate carries two texts too, top right and bottom centre, and
+  grows downwards to make room for the bottom one.
 
 Print pose: front face up, z = 0 on the bed. Band 0 is a stack of slabs (`slabs0`): the
 pockets or the channel are cut from the lower ones.
@@ -23,6 +25,7 @@ from dataclasses import dataclass, replace
 from functools import cache
 
 from build123d import CenterOf, Part, Rot
+from shapely import affinity
 from shapely.geometry import Point, Polygon, box
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
@@ -30,9 +33,9 @@ from shapely.ops import unary_union
 from . import artwork, relief
 from . import params as P
 from .artwork import rounded_rect
-from .charms import TEXTS, Charm
+from .charms import PLATE_COLOURS, TEXTS, Charm
 from .relief import Slab, polygons
-from .text import same_features
+from .text import limits, same_features, size_problems, text_geometry
 
 # The band cleanup (relief.colour_bands) repairs silently: it opens every band by
 # MIN_STROKE / 2 and fills specks. The letters must come through it unchanged but for their
@@ -51,6 +54,10 @@ class Clip:
     bars: tuple[tuple[float, float, float, float], ...]  # x0, x1, y0, y1 of each bar, top first
     walls: BaseGeometry  # the footprint under the charm outside the channel (the risers)
     plate: BaseGeometry | None = None  # the backing plate, if the charm needs one
+    # the texts on the plate, top first: (text, filament, its raw letters where they lie),
+    # and their font size
+    letters: tuple[tuple[str, str, BaseGeometry], ...] = ()
+    font: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -280,47 +287,234 @@ def clip_slabs(b0: BaseGeometry, x: float, cw: float, bars: tuple[Bar, ...],
 PLATE_MIN_H = 2 * (P.PLATE_EDGE + P.BAR_W) + P.BAR_W
 
 
-def plate_for(body: BaseGeometry, x: float, need: float) -> Polygon:
+def plate_for(body: BaseGeometry, x: float, need: float, above: float = 0.0,
+              below: float = 0.0) -> Polygon:
     """The backing plate of a clip over x: `need` wide, PLATE_MARGIN above and below the body
-    where it crosses that strip, and at least PLATE_MIN_H tall (centred on the strip)."""
+    where it crosses that strip, and at least PLATE_MIN_H tall (centred on the strip); then
+    `above` and `below` mm longer at the top and the bottom (room for its texts)."""
     strip = body.intersection(box(x - need / 2, -1e4, x + need / 2, 1e4))
     if strip.is_empty:
         raise ValueError("nothing of the charm lies under the backing plate")
     _, y0, _, y1 = strip.bounds
     y0, y1 = y0 - P.PLATE_MARGIN, y1 + P.PLATE_MARGIN
     grow = max(0.0, PLATE_MIN_H - (y1 - y0)) / 2
-    return rounded_rect(x - need / 2, y0 - grow, x + need / 2, y1 + grow, P.PLATE_CORNER)
+    return rounded_rect(x - need / 2, y0 - grow - below, x + need / 2, y1 + grow + above,
+                        P.PLATE_CORNER)
+
+
+# --- texts on the backing plate (moka_pour_rh1_clip) --------------------------------------
+GROW_MAX = 20.0  # mm: the most the texts may lengthen the plate, at the top or the bottom
+PLATE_ROUNDS = 6  # settle, fit the texts again where the plate went, settle again...
+
+
+@dataclass(frozen=True)
+class PlateText:
+    """A text of the plate at the origin: its raw letters, and the bands it raises (bands 1
+    up to its colour's), after the band cleanup."""
+
+    pos: str  # top | bottom
+    text: str
+    colour: str
+    raw: BaseGeometry
+    raised: tuple[BaseGeometry, ...]
+
+
+@cache
+def _plate_letters(name: str, bands: tuple[str, ...], pos: str, text: str, colour: str,
+                   size: float, forced: bool) -> PlateText:
+    """A text of the plate through the band cleanup on its own: up to its colour's band (a
+    green text raises the red band too). The cleanup does not depend on where the plate
+    goes, so the settling only moves the result. The letters must come through it as the
+    stream's do (letters_damage), on every band they raise."""
+    at = f"plate_font {size:g} mm" if forced else f"{size:g} mm (the largest that fits the plate)"
+    problems = size_problems((text,), size)
+    if problems:  # before colour_bands, which would quietly repair the letters
+        raise ValueError(f"{name}: at {at} {text!r} is too small: {'; '.join(problems)}. It "
+                         f"prints from {limits((text,)).size:g} mm")
+    raw = text_geometry((text,), size)
+    x0, y0, x1, y1 = raw.bounds
+    k = bands.index(colour)  # validate(): not 0, the body
+    body = box(x0 - 2, y0 - 2, x1 + 2, y1 + 2)
+    out = relief.colour_bands(name, bands[:k + 1], body, {colour: raw})
+    for j in range(1, k + 1):
+        why = letters_damage(out[j], raw)
+        if why is not None:
+            raise ValueError(f"{name}: at {at} the band cleanup changes {text!r}: {why}")
+    return PlateText(pos, text, colour, raw, tuple(out[1:]))
+
+
+def _anchor(pos: str, bounds, plate_bounds) -> tuple[float, float]:
+    """How far to move letters with these bounds onto the plate: the top text into its top
+    right corner, the bottom one to the middle of its bottom edge, PLATE_TEXT_MARGIN in."""
+    x0, y0, x1, y1 = bounds
+    px0, py0, px1, py1 = plate_bounds
+    m = P.PLATE_TEXT_MARGIN
+    if pos == "top":
+        return px1 - m - x1, py1 - m - y1
+    return (px0 + px1) / 2 - (x0 + x1) / 2, py0 + m - y0
+
+
+Fit = tuple[float, float, float]  # the texts' font size, the plate's growth above and below
+
+
+def _plate_fit(c: Charm, art, x: float, need: float, texts, moka,
+               size: float | None = None) -> Fit:
+    """The font size of the plate's texts, and how far they lengthen the plate, for the plate
+    over x. Each text's box lies inside the plate, PLATE_TEXT_MARGIN in, and STREAM_CLEAR
+    from the moka and from the other text. The size: `size`, plate_font, or the largest, at
+    0.1 mm steps, at which the top text fits its corner, at most POUR_FONT and as wide as
+    the plate allows (that width without a top text). Only if the corner is too small even
+    for the smallest size that prints both texts (with a narrower lanyard the plate no
+    longer reaches up to the knob), the plate grows at the top, just enough for that size.
+    Then it grows at the bottom, as little as the bottom text needs. All at 0.1 mm steps."""
+    clear, m = artwork.STREAM_CLEAR - 1e-9, P.PLATE_TEXT_MARGIN
+    px0, py0, px1, py1 = plate_for(art.body, x, need).bounds
+    words = {pos: t for pos, t, _ in texts}
+    em = {pos: text_geometry((t,), 1.0) for pos, t in words.items()}
+    if any(g.is_empty for g in em.values()):
+        raise ValueError(f"{c.name}: a text on the plate draws nothing: "
+                         f"{[t for pos, t in words.items() if em[pos].is_empty]}")
+    em = {pos: g.bounds for pos, g in em.items()}
+    floor = {pos: limits((t,)).size for pos, t in words.items()}
+    lowest = max(floor.values())  # one size for both
+    sets_it = words[max(floor, key=floor.get)]
+    inner_w = px1 - px0 - 2 * m
+    widest = min(math.floor(inner_w / (e[2] - e[0]) * 10 + 1e-6) / 10 for e in em.values())
+
+    def boxed(pos: str, s: float, above: float, below: float) -> Polygon:
+        x0, y0, x1, y1 = (v * s for v in em[pos])
+        dx, dy = _anchor(pos, (x0, y0, x1, y1), (px0, py0 - below, px1, py1 + above))
+        return box(x0 + dx, y0 + dy, x1 + dx, y1 + dy)
+
+    def fits(pos: str, s: float, above: float, below: float) -> bool:
+        b = boxed(pos, s, above, below)
+        bx0, by0, bx1, by1 = b.bounds
+        inside = (bx0 >= px0 + m - 1e-9 and bx1 <= px1 - m + 1e-9
+                  and by0 >= py0 - below + m - 1e-9 and by1 <= py1 + above - m + 1e-9)
+        apart = pos == "top" or "top" not in em or b.distance(
+            boxed("top", s, above, below)) >= clear
+        return inside and apart and b.distance(moka) >= clear
+
+    def grown(pos: str, s: float, above: float) -> float | None:
+        steps = (k / 10 for k in range(int(GROW_MAX * 10) + 1))
+        if pos == "top":
+            return next((a for a in steps if fits("top", s, a, 0.0)), None)
+        return next((b for b in steps if fits("bottom", s, above, b)), None)
+
+    forced = size or c.plate_font
+    if forced:
+        if forced > widest:
+            raise ValueError(f"{c.name}: at {forced:g} mm the texts on the plate are wider than "
+                             f"its {inner_w:.1f} mm inside the margins: at most {widest:g} mm")
+        sizes = [forced]
+    else:
+        cap = min(artwork.POUR_FONT, widest)
+        if cap < lowest:
+            raise ValueError(f"{c.name}: {sets_it!r} prints from {lowest:g} mm, but the plate "
+                             f"has room for the texts only up to {widest:g} mm across its "
+                             f"{inner_w:.1f} mm")
+        sizes = [round(cap - 0.1 * k, 1) for k in range(round((cap - lowest) * 10) + 1)]
+    above = 0.0
+    if "top" in em:
+        size = next((s for s in sizes if fits("top", s, 0.0, 0.0)), None)
+        if size is None:  # too small a corner: the plate grows at the top
+            size, above = sizes[-1], grown("top", sizes[-1], 0.0)
+            if above is None:
+                raise ValueError(f"{c.name}: {words['top']!r} does not fit the top right corner "
+                                 f"of the backing plate at {size:g} mm, even {GROW_MAX:g} mm "
+                                 "longer")
+    else:
+        size = sizes[0]
+    below = 0.0
+    if "bottom" in em:
+        below = grown("bottom", size, above)
+        if below is None:
+            raise ValueError(f"{c.name}: {words['bottom']!r} does not fit at the bottom of the "
+                             f"backing plate at {size:g} mm, even {GROW_MAX:g} mm longer")
+    return size, above, below
 
 
 def _plate_clip(c: Charm, art, bands, z, upper) -> CharmLayout:
     """A clip on a backing plate (plate_for). The plate and the channel move together: the
     plate is exactly the channel and its walls wide. Two bars, PLATE_EDGE from the top and
     the bottom of the plate: the top one joins the left wall (SLIT), the bottom one the right
-    wall (SLIT_WIDE). The ribbon goes into the top bar first."""
+    wall (SLIT_WIDE). The ribbon goes into the top bar first. The plate's texts (plate_top,
+    plate_bottom) rise in their colours' bands (_plate_fit, _plate_letters)."""
     cw = c.lanyard_w + P.CHANNEL_EXTRA
     need = cw + 2 * P.RISER_W
 
-    def place(x: float):
-        try:
-            plate = plate_for(art.body, x, need)
-        except ValueError as e:
-            raise ValueError(f"{c.name}: {e}") from None
-        # band 0 as colour_bands makes it, of the body with the plate, and as moka() fills the
-        # body: the holes under WINDOW_MIN where the plate meets the outline go
-        joined = polygons(relief.opening(unary_union([art.body, plate]), P.MIN_STROKE / 2))
-        if len(joined) != 1:
-            raise ValueError(f"{c.name}: the backing plate does not join the body")
-        b0 = Polygon(joined[0].exterior, [h for h in joined[0].interiors
-                                          if Polygon(h).area >= artwork.WINDOW_MIN])
-        _, py0, _, py1 = plate.bounds
-        bars = ((py1 - P.PLATE_EDGE - P.BAR_W / 2, P.SLIT, "left"),
-                (py0 + P.PLATE_EDGE + P.BAR_W / 2, P.SLIT_WIDE, "right"))
-        slabs0, clip = clip_slabs(b0, x, cw, bars, c.base_t)
-        return slabs0 + upper, (b0, replace(clip, plate=plate))
+    def placing(fit: Fit, letters: list[PlateText]):
+        _, above, below = fit
 
-    start = relief.centre([(bands[0], *z[0]), *upper])[0]
-    _, slabs, com, (b0, clip) = _settle(c.name, "the clip", start, place)
-    return CharmLayout(art, [b0, *bands[1:]], z, tuple(slabs[:3]), None, (), clip, com)
+        def place(x: float):
+            try:
+                plate = plate_for(art.body, x, need, above, below)
+            except ValueError as e:
+                raise ValueError(f"{c.name}: {e}") from None
+            # band 0 as colour_bands makes it, of the body with the plate, and as moka() fills
+            # the body: the holes under WINDOW_MIN where the plate meets the outline go
+            joined = polygons(relief.opening(unary_union([art.body, plate]), P.MIN_STROKE / 2))
+            if len(joined) != 1:
+                raise ValueError(f"{c.name}: the backing plate does not join the body")
+            b0 = Polygon(joined[0].exterior, [h for h in joined[0].interiors
+                                              if Polygon(h).area >= artwork.WINDOW_MIN])
+            _, py0, _, py1 = plate.bounds
+            bars = ((py1 - P.PLATE_EDGE - P.BAR_W / 2, P.SLIT, "left"),
+                    (py0 + P.PLATE_EDGE + P.BAR_W / 2, P.SLIT_WIDE, "right"))
+            slabs0, clip = clip_slabs(b0, x, cw, bars, c.base_t)
+            # the letters lie STREAM_CLEAR from the moka: as slabs of their own they weigh the
+            # same as joined to the bands, which happens once, after the settling
+            moved = [(t, *_anchor(t.pos, t.raw.bounds, plate.bounds)) for t in letters]
+            extra = [(affinity.translate(g, dx, dy), *z[j + 1])
+                     for t, dx, dy in moved for j, g in enumerate(t.raised)]
+            return slabs0 + upper + extra, (b0, replace(clip, plate=plate), moved)
+        return place
+
+    x = relief.centre([(bands[0], *z[0]), *upper])[0]
+    texts = [(pos, t, colour) for pos, t, colour in
+             zip(("top", "bottom"), (c.plate_top, c.plate_bottom), PLATE_COLOURS) if t]
+    if not texts:
+        _, slabs, com, (b0, clip, _) = _settle(c.name, "the clip", x, placing((0, 0, 0), []))
+        return CharmLayout(art, [b0, *bands[1:]], z, tuple(slabs[:3]), None, (), clip, com)
+    # the size and the growth stay fixed while the plate settles (steps would make the centre
+    # of mass jump); then they are fitted again where the plate went, until they hold there.
+    # If they swing between two, the smaller size, fitted where the plate is, ends it.
+    moka = unary_union([art.parts["pot"], art.parts["stream"]])
+    fit = _plate_fit(c, art, x, need, texts, moka)
+    tried = set()
+    for _ in range(PLATE_ROUNDS):
+        tried.add(fit)
+        letters = [_plate_letters(c.name, c.bands, pos, t, colour, fit[0], bool(c.plate_font))
+                   for pos, t, colour in texts]
+        x, slabs, com, (b0, clip, moved) = _settle(c.name, "the clip", x,
+                                                   placing(fit, letters))
+        again = _plate_fit(c, art, x, need, texts, moka)
+        if again != fit and again in tried:
+            again = _plate_fit(c, art, x, need, texts, moka, min(fit[0], again[0]))
+        if again == fit:
+            break
+        fit = again
+    else:
+        raise ValueError(f"{c.name}: the texts on the backing plate do not settle")
+    ups, placed = list(bands[1:]), []
+    for t, dx, dy in moved:
+        for j, g in enumerate(t.raised):  # its colour's band and those below it
+            ups[j] = unary_union([ups[j], affinity.translate(g, dx, dy)])
+        placed.append((t.text, t.colour, affinity.translate(t.raw, dx, dy)))
+    clip = replace(clip, letters=tuple(placed), font=fit[0])
+    _check_plate_texts(c, clip, moka)
+    return CharmLayout(art, [b0, *ups], z, tuple(slabs[:3]), None, (), clip, com)
+
+
+def _check_plate_texts(c: Charm, clip: Clip, moka: BaseGeometry) -> None:
+    """The placed letters lie on the plate, PLATE_TEXT_MARGIN in, STREAM_CLEAR from the moka
+    and from each other (_plate_fit fits their boxes: this checks the result)."""
+    inner = clip.plate.buffer(-P.PLATE_TEXT_MARGIN + 1e-6, join_style="mitre")
+    clear = artwork.STREAM_CLEAR - 1e-6
+    for k, (t, _, g) in enumerate(clip.letters):
+        if not inner.contains(g) or g.distance(moka) < clear or any(
+                g.distance(o) < clear for _, _, o in clip.letters[k + 1:]):
+            raise ValueError(f"{c.name}: {t!r} does not lie clear on the backing plate")
 
 
 def _clip(c: Charm, art, bands, z, upper) -> CharmLayout:
@@ -363,7 +557,11 @@ def text_damage(art: artwork.Artwork, band: BaseGeometry) -> str | None:
     band of the text's colour."""
     # where only the letters are: the tag's white middle clear of the end bands, the moka's
     # stream clear of the pot (the spout, the lid, the knob and the handle are red too)
-    raised, raw = band.intersection(art.parts["text_zone"]), art.text
+    return letters_damage(band.intersection(art.parts["text_zone"]), art.text)
+
+
+def letters_damage(raised: BaseGeometry, raw: BaseGeometry) -> str | None:
+    """How the raised letters differ from the raw ones (None: only at their corners)."""
     if not same_features(raised, raw, 1e-3):
         return "it changes the pieces or holes of the letters"
     lost = raw.difference(raised)
