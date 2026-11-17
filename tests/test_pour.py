@@ -18,7 +18,7 @@ EYELET, MAGNET, CLIP = (VARIANTS[f"moka_pour_{w}"] for w in ("eyelet", "magnet",
 def test_variants_and_their_defaults():
     assert POUR == [EYELET, MAGNET, CLIP]
     for c in POUR:
-        assert c.text == "services" and c.bands == ("white", "red", "green")
+        assert c.text == "consulting" and c.bands == ("white", "red", "green")
         assert c.band_ts == (P.POUR_RED_T, P.BAND_T) == pytest.approx((1.2, 0.8))
         assert wear.layout(c).art.font_size == artwork.POUR_FONT == 10.0
     assert MAGNET.counter_name == "moka_pour_counter"
@@ -33,12 +33,16 @@ def test_red_t_changes_only_the_red_band():
     assert VARIANTS["moka_eyelet"].band_ts == pytest.approx((0.8, 0.8, 0.8))
 
 
-def test_plain_moka_ignores_a_text():
-    """So that a --set text for every charm works, as before the moka that pours."""
+@pytest.mark.parametrize("t", ["espresso", ""])
+def test_plain_moka_ignores_a_text(t):
+    """So that a --set text for every charm works, as before the moka that pours: an empty
+    one too."""
     plain = wear.layout(VARIANTS["moka_eyelet"])
-    with_text = wear.layout(charm("moka_eyelet", text="espresso"))
+    with_text = wear.layout(charm("moka_eyelet", text=t))
     assert with_text.art.text is None
     assert [b.equals(p) for b, p in zip(with_text.bands, plain.bands)] == [True] * 4
+    with pytest.raises(ValueError, match="the text is empty"):
+        charm("moka_pour_eyelet", text=" ").validate()
 
 
 def test_a_new_layout_brings_its_own_defaults():
@@ -52,24 +56,28 @@ def test_a_smaller_font_size_can_be_forced_down_to_the_texts_limit():
     glyphs' own limit (the gap in 'e', 6.8 mm), although the same text straight would need
     7.9 mm (the gap between two characters)."""
     assert glyph_limits("services").size == 6.8
-    assert wear.layout(charm("moka_pour_eyelet", font_size=6.8)).art.font_size == 6.8
+    c = charm("moka_pour_eyelet", text="services", font_size=6.8)
+    assert wear.layout(c).art.font_size == 6.8
     with pytest.raises(ValueError, match="font_size 6 mm is too small"):
-        wear.layout(charm("moka_pour_eyelet", font_size=6.0))
+        wear.layout(charm("moka_pour_eyelet", text="services", font_size=6.0))
 
 
 def test_a_size_too_small_for_the_bent_line_is_skipped(monkeypatch):
     """A short stream bends tighter as the letters grow: if an automatic size is too small
-    for the bent line, the next one is tried."""
+    for the bent line, the next one is tried, and size_bound says why."""
     make = artwork.make
 
     def first_too_small(c, size=None):
         if size == artwork.POUR_FONT:
-            raise artwork.TooSmall(f"{c.name}: font_size {size:g} mm is too small: (test)")
+            raise artwork.TooSmall(f"{c.name}: font_size {size:g} mm is too small: (test)",
+                                   "(test)")
         return make(c, size)
 
     monkeypatch.setattr(artwork, "make", first_too_small)
-    lay = wear.layout(charm("moka_pour_eyelet", text="servizi"))
+    # past the cache of layout: the fake must not stay there for other tests
+    lay = wear.layout.__wrapped__(charm("moka_pour_eyelet", text="servizi"))
     assert lay.art.font_size == artwork.POUR_FONT + 0.1
+    assert lay.art.size_bound == "the bent text on its stream, too small at 10 mm"
 
 
 def test_only_a_band_left_empty_is_refused():
@@ -223,10 +231,14 @@ def test_plate_walls_hold_the_ceiling(parts):
     assert checked > 200  # the whole height of the plate
 
 
-def test_clip_is_the_printed_test():
-    """The owner printed this one (2026-11-16, 'services', v3) and approved it."""
-    assert wear.layout(CLIP).size == pytest.approx((82.4, 54.0, 6.0), abs=0.05)
-    assert [z for z, _ in wear.colour_changes(CLIP)] == pytest.approx([4.2, 5.4])
+@pytest.mark.parametrize(("t", "size"), [("consulting", (92.6, 60.3, 6.0)),
+                                         ("services", (82.4, 54.0, 6.0))])
+def test_clip_is_the_printed_test(t, size):
+    """The owner printed these and approved them: 'services' (2026-11-16, v3) and the
+    default, 'consulting' (2026-11-17)."""
+    c = charm("moka_pour_clip", text=t)
+    assert wear.layout(c).size == pytest.approx(size, abs=0.05)
+    assert [z for z, _ in wear.colour_changes(c)] == pytest.approx([4.2, 5.4])
 
 
 def test_no_clip_gauge_for_a_backing_plate():

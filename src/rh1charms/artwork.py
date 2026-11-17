@@ -70,7 +70,7 @@ STREAM_END = 1.0  # the letters <-> the round ends of the stream
 STREAM_CLEAR = 1.0  # the letters <-> every part of the moka (the spout and the lid are red)
 # degrees: how far the stream may bend along its text, to stay readable. It sets the radius
 # of the middle line for the lead and the text; the text lies on a smaller radius (its
-# baseline), so the letters turn a few degrees more (64 for 'services')
+# baseline), so the letters turn a few degrees more (62 for 'consulting', 64 for 'services')
 STREAM_TURN = 60.0
 STREAM_RADIUS = 18.0  # mm: the tightest bend of the stream (its middle line)
 LEAD_STEP = 0.5  # mm: the text moves along the stream until it clears the moka
@@ -80,7 +80,12 @@ POUR_FONT = 10.0
 
 
 class TooSmall(ValueError):
-    """A font size under the text's limits (wear.layout tries the next automatic size)."""
+    """A font size under the text's limits (wear.layout tries the next automatic size).
+    `reason`: what breaks, without the charm's name or a hint."""
+
+    def __init__(self, message: str, reason: str):
+        super().__init__(message)
+        self.reason = reason
 
 
 @dataclass(frozen=True)
@@ -109,8 +114,9 @@ def tag(c: Charm, size: float | None = None) -> Artwork:
     size = size or c.font_size or lim.size
     problems = size_problems(lines, size)
     if problems:  # before colour_bands, which would quietly repair the letters
-        raise TooSmall(f"{c.name}: font_size {size:g} mm is too small: {'; '.join(problems)}. "
-                       f"The smallest font size for this text is {lim.size:g} mm")
+        why = "; ".join(problems)
+        raise TooSmall(f"{c.name}: font_size {size:g} mm is too small: {why}. "
+                       f"The smallest font size for this text is {lim.size:g} mm", why)
     txt = text_geometry(lines, size)
     x0, y0, x1, y1 = txt.bounds
     w = 2 * END_BAND + 2 * TEXT_MARGIN + (x1 - x0)
@@ -265,8 +271,8 @@ def moka(c: Charm, size: float | None = None) -> Artwork:
                 hint = f". The smallest font size for this text is {smallest_size(c)[0]:g} mm"
             except ValueError as e:
                 hint = f" ({e})"
-            raise TooSmall(f"{c.name}: font_size {size:g} mm is too small: "
-                           f"{'; '.join(problems)}{hint}")
+            why = "; ".join(problems)
+            raise TooSmall(f"{c.name}: font_size {size:g} mm is too small: {why}{hint}", why)
         painted.insert(0, ("white", band))
     visible: dict[str, list] = {}
     covered = Polygon()

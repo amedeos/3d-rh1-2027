@@ -28,7 +28,7 @@ examples:
   uv run rh1charms export tag --wear clip --copies 6
   uv run rh1charms export tag_two_lines_magnet --copies 4 --set magnet_clr=0.3
   uv run rh1charms export moka --copies 6
-  uv run rh1charms export moka --layout pour --wear clip --set text=consulting
+  uv run rh1charms export moka --layout pour --wear clip --set text=services
   uv run rh1charms render tag --layout two_lines
   uv run rh1charms export tag --set text=consulting@roma:~$
 """
@@ -89,6 +89,8 @@ def _charms(names: list[str], wear, layout, sets: list[tuple[str, str]]) -> list
     for name in select(names, wear, layout):
         base = charm(name)
         c = charm(name, **{k: parse_value(base, k, v) for k, v in sets})
+        if c in out:  # --set layout=pour turns moka_eyelet into moka_pour_eyelet
+            continue
         W.layout(c)
         out.append(c)
     return out

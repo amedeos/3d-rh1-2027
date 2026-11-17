@@ -25,7 +25,7 @@ SUBJECTS = ("tag", "moka")
 WEARS = ("eyelet", "magnet", "clip")
 LAYOUTS_OF = {"tag": LAYOUTS, "moka": ("", "pour")}  # "" = the moka without a layout
 DEFAULT_TEXT = "consulting@italy:~$"
-POUR_TEXT = "services"  # the text of the moka that pours (the owner's choice)
+POUR_TEXT = "consulting"  # the text of the moka that pours (the owner's choice, 2026-11-17)
 # the drawings with a text, in raised red letters (red cannot print their body), and their
 # default text
 TEXTS = {"tag": DEFAULT_TEXT, "moka_pour": POUR_TEXT}
@@ -126,7 +126,7 @@ class Charm:
             choices = ", ".join(lay or "none" for lay in LAYOUTS_OF[self.subject])
             raise ValueError(f"unknown layout {self.layout!r} for the {self.subject}; choose from "
                              f"{choices}")
-        if self.text is not None and not self.text.strip():
+        if self.drawing in TEXTS and not self.text.strip():  # the plain moka ignores it
             raise ValueError(f"{self.name}: the text is empty")
         if self.drawing == "moka_pour" and "\n" in self.text:
             raise ValueError(f"{self.name}: the moka's text is one line, without a line break")

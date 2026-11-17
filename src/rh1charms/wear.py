@@ -391,6 +391,7 @@ def _artwork_and_bands(c: Charm) -> tuple[artwork.Artwork, list[BaseGeometry]]:
         return art, relief.colour_bands(c.name, c.bands, art.body, art.regions)
     text_band = c.bands.index("red")
     start = c.font_size or artwork.auto_size(c)[0]
+    cause = ""  # why the size before did not print, for size_bound
     for k in range(1 if c.font_size else P.SIZE_STEPS):
         size = c.font_size or round(start + 0.1 * k, 1)  # a forced size stays as it is
         try:
@@ -398,15 +399,15 @@ def _artwork_and_bands(c: Charm) -> tuple[artwork.Artwork, list[BaseGeometry]]:
         except artwork.TooSmall as e:
             if c.font_size:
                 raise
-            why = str(e).partition(": ")[2]
+            why, cause = e.reason, f"the bent text on its stream, too small at {size:g} mm"
             continue
         bands = relief.colour_bands(c.name, c.bands, art.body, art.regions)
         why = text_damage(art, bands[text_band])
         if why is None:
             if k:
-                art = replace(art, size_bound=f"the band cleanup, which changes the letters "
-                                              f"at {size - 0.1:g} mm")
+                art = replace(art, size_bound=cause)
             return art, bands
+        cause = f"the band cleanup, which changes the letters at {size:g} mm"
         if c.font_size:
             raise ValueError(f"{c.name}: at font_size {size:g} mm the band cleanup changes the "
                              f"letters: {why}. Make font_size larger")

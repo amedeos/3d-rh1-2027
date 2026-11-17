@@ -8,8 +8,9 @@
 One M600 serves the whole plate, so a plate holds `copies` of one charm with one way of
 wearing it: different variants have different band heights. A magnet charm brings its
 counter plate (the same number of copies) and the pocket gauge (once), a clip charm
-without a backing plate the clip gauge (once): they are plates in one colour. A charm plate carries all its colour
-changes as PrusaSlicer metadata, so they are already set when you open the file.
+without a backing plate the clip gauge (once): they are plates in one colour. A charm plate
+carries all its colour changes as PrusaSlicer metadata, so they are already set when you
+open the file.
 
 plan.json is written from the design: slicer.py checks the real G-code and the projects
 against it, not against the 3MF it is checking. "bridges" lists the print_z of the first
