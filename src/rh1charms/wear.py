@@ -364,8 +364,8 @@ def _plate_fit(c: Charm, art, x: float, need: float, texts, moka,
     from the moka and from the other text. The size: `size`, plate_font, or the largest, at
     0.1 mm steps, at which the top text fits its corner, at most POUR_FONT and as wide as
     the plate allows (that width without a top text). Only if the corner is too small even
-    for the smallest size that prints both texts (with a narrower lanyard the plate no
-    longer reaches up to the knob), the plate grows at the top, just enough for that size.
+    for the smallest size that prints both texts (a wide top text such as 'RH1RH1'), or for
+    a forced size, the plate grows at the top, just enough for that size.
     Then it grows at the bottom, as little as the bottom text needs. All at 0.1 mm steps."""
     clear, m = artwork.STREAM_CLEAR - 1e-9, P.PLATE_TEXT_MARGIN
     px0, py0, px1, py1 = plate_for(art.body, x, need).bounds

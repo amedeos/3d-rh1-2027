@@ -1,6 +1,7 @@
 """The moka that pours: its variants and defaults, the stream and its text, the colours, the
 two magnets, the clip on a backing plate, and RH1 and 2027 on that plate."""
 
+import math
 import re
 from dataclasses import replace
 
@@ -26,7 +27,7 @@ def test_variants_and_their_defaults():
     for c in POUR:
         assert c.text == "consulting" and c.bands == ("white", "red", "green")
         assert c.band_ts == (P.POUR_RED_T, P.BAND_T) == pytest.approx((1.2, 0.8))
-        assert wear.layout(c).art.font_size == artwork.POUR_FONT == 10.0
+        assert wear.layout(c).art.font_size == artwork.POUR_FONT == 9.0
     assert MAGNET.counter_name == "moka_pour_counter"
 
 
@@ -83,7 +84,8 @@ def test_a_size_too_small_for_the_bent_line_is_skipped(monkeypatch):
     # past the cache of layout: the fake must not stay there for other tests
     lay = wear.layout.__wrapped__(charm("moka_pour_eyelet", text="servizi"))
     assert lay.art.font_size == artwork.POUR_FONT + 0.1
-    assert lay.art.size_bound == "the bent text on its stream, too small at 10 mm"
+    assert lay.art.size_bound == (f"the bent text on its stream, too small at "
+                                  f"{artwork.POUR_FONT:g} mm")
 
 
 def test_only_a_band_left_empty_is_refused():
@@ -113,16 +115,17 @@ def test_bent_text_keeps_its_letters(t):
 
 
 def test_text_runs_along_the_stream_from_the_spout():
-    """The letters start next to the tip of the spout, clear of the pot, inside the stream;
-    the stream goes on STREAM_END after the last letter (its side bearing aside), then ends
-    round."""
+    """The letters start next to the tip of the spout, clear of the pot, inside the stream,
+    STREAM_MARGIN from its edges (a few hundredths less at the corners of bent letters);
+    the stream ends round at both ends, and no part of it lies far from the letters."""
     art = wear.layout(EYELET).art
     band, pot, letters = art.parts["stream"], art.parts["pot"], art.text
     tip = artwork.pour_pose(Point(artwork.SPOUT_AXIS[1]))
     assert letters.distance(tip) < artwork.STREAM_CLEAR + 1.5
     assert letters.distance(pot) >= artwork.STREAM_CLEAR - 1e-6
-    assert band.buffer(0.05 - artwork.STREAM_END).contains(letters)
+    assert band.buffer(0.06 - artwork.STREAM_MARGIN).contains(letters)
     half = artwork.stream_layout(EYELET.text, art.font_size).half
+    # at the spout the letters start STREAM_END from its tip (the end has its own test)
     beyond = band.difference(pot.buffer(0.5)).difference(
         letters.buffer(half + artwork.STREAM_END + 0.1 * art.font_size))
     assert beyond.area < 0.1
@@ -238,14 +241,32 @@ def test_plate_walls_hold_the_ceiling(parts, c):
     assert checked > 200  # the whole height of the plate
 
 
-@pytest.mark.parametrize(("t", "size"), [("consulting", (92.6, 60.3, 6.0)),
-                                         ("services", (82.4, 54.0, 6.0))])
-def test_clip_is_the_printed_test(t, size):
-    """The owner printed these and approved them: 'services' (2026-11-16, v3) and the
-    default, 'consulting' (2026-11-17)."""
-    c = charm("moka_pour_clip", text=t)
-    assert wear.layout(c).size == pytest.approx(size, abs=0.05)
-    assert [z for z, _ in wear.colour_changes(c)] == pytest.approx([4.2, 5.4])
+def test_clip_is_the_printed_test():
+    """The owner printed a prototype of the default (2026-11-17: 'consulting' at 9 mm, the
+    short end; 85.5 x 52.5 mm, its margin at the end was 0.02 mm smaller) and chose it."""
+    assert wear.layout(CLIP).size == pytest.approx((85.5, 52.6, 6.0), abs=0.05)
+    assert [z for z, _ in wear.colour_changes(CLIP)] == pytest.approx([4.2, 5.4])
+
+
+@pytest.mark.parametrize(("t", "size"), [("consulting", 0.0), ("consulting", 20.0),
+                                         ("services", 0.0), ("sudo espresso", 0.0),
+                                         ("kill -9 sleep", 0.0), ("ab     ", 0.0)])
+def test_stream_ends_its_margin_after_the_last_letter(t, size):
+    """The round end lies STREAM_MARGIN (less END_SLACK) from the last letter's ink, at any
+    size, as the long edges do, and no further: a stream 1 mm shorter would come closer.
+    Trailing spaces leave no white. (On the long edges a corner of a bent letter can come a
+    few hundredths closer: a far longer stream measures them.)"""
+    c = charm("moka_pour_eyelet", text=t, font_size=size)
+    size = wear.layout(c).art.font_size
+    s, band, letters = artwork._stream(c, size, artwork.make(c, size).parts["pot"])
+    m = artwork.STREAM_MARGIN - artwork.END_SLACK
+    sides = letters.distance(replace(s, end=s.end - 90.0).band().exterior)  # clockwise
+    assert band.contains(letters)
+    assert letters.distance(band.exterior) >= min(sides, m) - 1e-6
+    # 1 mm: where the closest ink is a corner near a long edge (the p of 'sleep'), the
+    # round end leaves it slowly
+    shorter = replace(s, end=s.end + math.degrees(1.0 / s.middle)).band()
+    assert letters.distance(shorter.exterior) < min(sides, m) - 0.1
 
 
 def test_no_clip_gauge_for_a_backing_plate():
@@ -358,25 +379,36 @@ def test_plate_fit_holds_where_the_plate_settles():
     assert fit == pytest.approx((lay.clip.font, py1 - plain[3], plain[1] - py0), abs=1e-9)
 
 
+def test_a_wide_top_text_grows_the_plate_at_the_top():
+    """If the corner is too small even for the smallest size that prints both texts, the
+    plate grows at the top, just enough for that size."""
+    lay = wear.layout(charm("moka_pour_rh1_clip", plate_top="RH1RH1"))
+    assert lay.clip.font == max(limits((t,)).size for t in ("RH1RH1", "2027"))
+    assert lay.clip.plate.bounds[3] > _plain_plate(lay)[3] + 1.0
+
+
 def test_plate_font_can_be_forced():
     """Smaller: a shorter plate. Larger than the corner: the plate grows at the top too."""
     small = wear.layout(charm("moka_pour_rh1_clip", plate_font=7.0))
     assert small.clip.font == 7.0 and len(small.clip.letters) == 2
     assert small.clip.plate.bounds[1] > wear.layout(RH1).clip.plate.bounds[1]
-    large = wear.layout(charm("moka_pour_rh1_clip", plate_font=9.5))
-    assert large.clip.font == 9.5
+    large = wear.layout(charm("moka_pour_rh1_clip", plate_font=12.0, plate_bottom=""))
+    assert large.clip.font == 12.0
     assert large.clip.plate.bounds[3] > _plain_plate(large)[3] + 1.0
 
 
 @pytest.mark.parametrize("lw", [18.0, 15.0])
-def test_a_narrower_lanyard_grows_the_plate_at_the_top(lw):
-    """A narrower plate no longer reaches up to the knob, and its corner is too small for
-    RH1: the plate grows at the top, just enough for the smallest size that prints both
-    texts (so a --set lanyard_w for every charm still works)."""
+def test_a_narrower_lanyard_gives_smaller_texts(lw):
+    """A narrower plate: the texts are no wider than its inside, and still lie where they
+    should (so a --set lanyard_w for every charm still works). Far narrower, no size that
+    prints fits, and that is a clear error."""
     lay = wear.layout(charm("moka_pour_rh1_clip", lanyard_w=lw))
     need = lw + P.CHANNEL_EXTRA + 2 * P.RISER_W
-    assert lay.clip.plate.bounds[3] > _plain_plate(lay, need)[3] + 1.0
-    assert lay.clip.font == max(limits((t,)).size for t in ("RH1", "2027"))
+    assert lay.clip.font <= wear.layout(RH1).clip.font
+    for _, _, g in lay.clip.letters:
+        assert g.bounds[2] - g.bounds[0] <= need - 2 * P.PLATE_TEXT_MARGIN + 1e-6
+    with pytest.raises(ValueError, match="has room for the texts only up to"):
+        wear.layout(charm("moka_pour_rh1_clip", lanyard_w=10.0))
 
 
 def test_a_wide_bottom_text_alone_gets_the_size_the_plate_allows():

@@ -18,7 +18,7 @@ A region in bands[0] (white) is the body itself: it shows at the top of the body
 """
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import cache
 
 import numpy as np
@@ -65,8 +65,10 @@ WINDOW_MIN = 4.0  # mm2: smaller holes in the body are filled (margins that near
 # --- the stream of a moka with a text -----------------------------------------------------
 POUR_TILT = 35.0  # degrees: the moka leans forward (clockwise, once mirrored) to pour
 SPOUT_AXIS = ((-8.6, 25.0), (-12.6, 27.4))  # as drawn: the middle of its base, its tip
-STREAM_MARGIN = 1.5  # the letters <-> the long edges of the stream
-STREAM_END = 1.0  # the letters <-> the round ends of the stream
+# the letters <-> the edges of the stream: its long edges, and its round end after the last
+# letter (the owner's choice after a test print, 2026-11-17: no more white than at the sides)
+STREAM_MARGIN = 1.5
+STREAM_END = 1.0  # the tip of the spout <-> the first letter
 STREAM_CLEAR = 1.0  # the letters <-> every part of the moka (the spout and the lid are red)
 # degrees: how far the stream may bend along its text, to stay readable. It sets the radius
 # of the middle line for the lead and the text; the text lies on a smaller radius (its
@@ -74,9 +76,15 @@ STREAM_CLEAR = 1.0  # the letters <-> every part of the moka (the spout and the 
 STREAM_TURN = 60.0
 STREAM_RADIUS = 18.0  # mm: the tightest bend of the stream (its middle line)
 LEAD_STEP = 0.5  # mm: the text moves along the stream until it clears the moka
+STREAM_QUAD_SEGS = 16  # segments per quarter circle of the stream's outline (its round ends)
+# mm: how much less than STREAM_MARGIN the round end may leave. The lowest point of the line
+# (the descender of a g) lies STREAM_MARGIN from the long edge less a chord's sag, a few
+# thousandths: where the round end leaves the long edge, a full margin there would push
+# the end out by tenths of a millimetre
+END_SLACK = 0.01
 # the automatic font size of the moka that pours is at least this (mm): the owner's choice
-# after a test print (2026-11-16), so that the letters fill the stream
-POUR_FONT = 10.0
+# after test prints (10 mm on 2026-11-16, then 9 mm on 2026-11-17: a shorter, lighter moka)
+POUR_FONT = 9.0
 
 
 class TooSmall(ValueError):
@@ -161,7 +169,7 @@ class Stream:
     half: float  # half the width of the stream
     base: float  # radius of the baseline of the text
     start: float  # the spout end of the stream (the centre of its round end)
-    end: float  # the other end
+    end: float  # the other end (stream_layout: room to spare; _stream: end_after)
     mid: float  # the middle of the text
 
     @property
@@ -169,14 +177,19 @@ class Stream:
         """The baseline radius over the font size (text.arc_limits)."""
         return self.base / self.size
 
+    def band(self) -> BaseGeometry:
+        """The stream: its middle line from `start` to `end`, half its width all round."""
+        return _arc(self.centre, self.middle, self.start, self.end).buffer(
+            self.half, quad_segs=STREAM_QUAD_SEGS)
+
 
 def stream_layout(line: str, size: float, lead: float = 0.0, tilt: float = POUR_TILT) -> Stream:
     """The stream leaves the tip of the spout along the spout's axis and bends down along a
     circle: STREAM_RADIUS at least, and large enough that an arc of the middle line as long
     as the lead and the text turns STREAM_TURN at most (the text, on its baseline, turns a
-    little more). The text starts `lead` mm plus STREAM_END from the tip of the spout, and
-    the stream goes on STREAM_END after its last letter, then ends round (its ends are
-    half-discs, centred on `start` and `end`)."""
+    little more). The text starts `lead` mm plus STREAM_END from the tip of the spout. The
+    stream's ends are half-discs, centred on `start` and `end`; here `end` lies STREAM_END
+    after the last letter's advance, room to spare that _stream trims (end_after)."""
     root, tip = (pour_pose(Point(p), tilt) for p in SPOUT_AXIS)
     phi = math.atan2(tip.y - root.y, tip.x - root.x)  # where the coffee goes
     _, y0, _, y1 = text_em((line,)).bounds
@@ -201,6 +214,8 @@ def smallest_size(c: Charm) -> tuple[float, str]:
     counts (arc_limits). The search starts from its glyphs' own limits, which the bend does
     not change. The bent text is measured on the stream before the text moves along it
     (lead 0); moving on makes the stream gentler, so this size is on the safe side."""
+    if text_em(split_lines(c.text, c.layout) if c.subject == "tag" else (c.text,)).is_empty:
+        raise ValueError(f"{c.name}: the text {c.text!r} draws nothing")
     if c.subject == "tag":
         lim = limits(split_lines(c.text, c.layout))
         return lim.size, lim.bound
@@ -229,16 +244,47 @@ def _arc(centre, radius: float, a0: float, a1: float) -> LineString:
                                        centre[1] + radius * np.sin(angles)]))
 
 
+def end_after(name: str, s: Stream, letters: BaseGeometry) -> float:
+    """Where the stream ends (the centre of its round end, in degrees): as soon as its round
+    end lies STREAM_MARGIN from the last letter's ink, as its long edges do (trailing spaces
+    leave no white). The letters past the end's radius must lie within the end's half-disc,
+    STREAM_MARGIN (less END_SLACK) in from its outline, a polygon of STREAM_QUAD_SEGS
+    segments a quarter (its edges lie a little inside the circle). The earlier the end, the more of the
+    letters lie past it, so a bisection finds it, between s.end (STREAM_END after the last
+    advance, plus the whole half-disc: room to spare) and the start of the stream."""
+    cx, cy = s.centre
+    # the radius of the circle inside the outline's polygon, less the margin
+    inner = s.half * math.cos(math.pi / (4 * STREAM_QUAD_SEGS)) - (STREAM_MARGIN - END_SLACK)
+
+    def holds(end: float) -> bool:
+        a = math.radians(end)
+        e = Point(cx + s.middle * math.cos(a), cy + s.middle * math.sin(a))
+        # past the end: the wedge clockwise of its radius (the stream bends clockwise)
+        wedge = Polygon([s.centre, *_arc(s.centre, 2 * (s.middle + s.half), end - 90.0,
+                                         end).coords])
+        past = letters.intersection(wedge)
+        return past.is_empty or past.within(e.buffer(inner, quad_segs=64))
+
+    lo, hi = s.end, s.start
+    if not holds(lo):
+        raise ValueError(f"{name}: the last letter reaches past the end of its stream")
+    for _ in range(30):  # 60 degrees / 2**30: a few nanometres
+        m = (lo + hi) / 2
+        lo, hi = (m, hi) if holds(m) else (lo, m)
+    return lo
+
+
 def _stream(c: Charm, size: float, pot: BaseGeometry):
     """The stream and its letters: the text moves along the stream, LEAD_STEP at a time,
-    until it is STREAM_CLEAR from every part of the moka."""
+    until it is STREAM_CLEAR from every part of the moka. The stream ends STREAM_MARGIN
+    after the last letter (end_after)."""
     lead = 0.0
     for _ in range(100):
         s = stream_layout(c.text, size, lead)
         letters = arc_text(c.text, size, s.base, s.mid, s.centre)
         if letters.distance(pot) >= STREAM_CLEAR - 1e-9:
-            band = _arc(s.centre, s.middle, s.start, s.end).buffer(s.half, quad_segs=16)
-            return s, band, letters
+            s = replace(s, end=end_after(c.name, s, letters))
+            return s, s.band(), letters
         lead += LEAD_STEP
     raise ValueError(f"{c.name}: the letters never clear the moka")
 

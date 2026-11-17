@@ -59,7 +59,7 @@ def test_list_shows_every_variant_with_its_font_size(capsys):
     assert "font 8.3 mm (smallest: the gap in '@')" in lines["tag_one_line_eyelet"]
     assert "M600 at 4.20 red, 5.00 green" in lines["tag_two_lines_clip"]
     assert "counter plate moka_counter" in lines["moka_magnet"]
-    assert ("font 10 mm (smallest: 6.4 mm, the gap in 's'; the stream takes 10 mm)"
+    assert ("font 9 mm (smallest: 6.4 mm, the gap in 's'; the stream takes 9 mm)"
             in lines["moka_pour_eyelet"])
     assert "2 x 8.2 mm pocket, counter plate moka_pour_counter" in lines["moka_pour_magnet"]
     assert "M600 at 4.20 red, 5.40 green" in lines["moka_pour_clip"]
