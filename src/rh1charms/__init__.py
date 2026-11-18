@@ -1,5 +1,6 @@
 """Parametric, 3D-printable wearable charms for the Italian Consulting team at Red Hat's
-RH1 2027: a name tag and a moka pot, in colour bands, with an eyelet, magnets or a clip."""
+RH1 2027 (and a moka clip for the whole Italian team): a name tag and a moka pot, in colour
+bands, with an eyelet, magnets or a clip."""
 
 USAGE = """\
 usage: rh1charms COMMAND [CHARM ...] [options]
@@ -17,9 +18,10 @@ variant.
 
 options (for list, export and render):
   --wear eyelet|magnet|clip      only this way of wearing it
-  --layout one_line|two_lines|pour|pour_rh1
+  --layout one_line|two_lines|pour|pour_rh1|pour_team
                                  only this layout (the tag's lines, the moka that pours,
-                                 and with RH1 and 2027 on its clip plate)
+                                 with RH1 and 2027 on its clip plate, and with team@italy
+                                 for the whole Italian team)
   --copies N                     copies of the charm on each plate (export; default 1)
   --bands A,B,...                filaments from the bed up, e.g. --bands white,red,green
   --set KEY=VALUE                any parameter of charms.Charm, e.g. --set magnet_clr=0.3
@@ -30,6 +32,7 @@ examples:
   uv run rh1charms export tag_two_lines_magnet --copies 4 --set magnet_clr=0.3
   uv run rh1charms export moka --copies 6
   uv run rh1charms export moka --layout pour --wear clip --set text=services
+  uv run rh1charms export moka_pour_team_clip --copies 6
   uv run rh1charms render tag --layout two_lines
   uv run rh1charms export tag --set text=consulting@roma:~$
 """
@@ -45,7 +48,8 @@ def _fail(message: str) -> None:
 def select(names: list[str], wear: str | None, layout: str | None) -> list[str]:
     """The charm names that the arguments ask for. A subject gives all its default variants;
     with --wear, that one in each of its layouts that has it by default, or, if none has
-    it, in all of them (like the plain moka's clip, which then fails with the reason).
+    it, in all of them (like the plain moka's clip, which then fails with the reason). So
+    does --wear with --layout and no CHARM (moka_pour_team_magnet fails with the reason).
     --wear and --layout filter the variants named."""
     from .charms import LAYOUTS_OF, SUBJECTS, WEARS, Charm, default_wears, parse_name
 
@@ -62,7 +66,7 @@ def select(names: list[str], wear: str | None, layout: str | None) -> list[str]:
                 raise ValueError(f"--layout {layout} is not a layout of the {name}; choose "
                                  f"from {choices}")
             layouts = [layout] if layout else list(LAYOUTS_OF[name])
-            if wear and names:
+            if wear and (names or layout):
                 having = [lay for lay in layouts if wear in default_wears(name, lay)]
                 pairs = [(lay, wear) for lay in having or layouts]
             else:
@@ -82,7 +86,8 @@ def select(names: list[str], wear: str | None, layout: str | None) -> list[str]:
 
 def _charms(names: list[str], wear, layout, sets: list[tuple[str, str]]) -> list:
     """The charms asked for, each laid out once: a charm that cannot be built (the moka with
-    a clip, a font size that is too small) stops the command before it writes anything."""
+    a clip, a font size that is too small) stops the command before it writes anything. Two
+    charms that build the same parts (Charm.same_parts) are made once, by the first name."""
     from . import wear as W
     from .charms import charm, parse_value
 
@@ -90,7 +95,9 @@ def _charms(names: list[str], wear, layout, sets: list[tuple[str, str]]) -> list
     for name in select(names, wear, layout):
         base = charm(name)
         c = charm(name, **{k: parse_value(base, k, v) for k, v in sets})
-        if c in out:  # --set layout=pour turns moka_eyelet into moka_pour_eyelet
+        # --set layout=pour turns moka_eyelet into moka_pour_eyelet; with --set text=X,
+        # moka_pour_team_clip builds what moka_pour_clip builds
+        if c.same_parts in {o.same_parts for o in out}:
             continue
         W.layout(c)
         out.append(c)

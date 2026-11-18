@@ -64,6 +64,8 @@ def test_list_shows_every_variant_with_its_font_size(capsys):
     assert "2 x 8.2 mm pocket, counter plate moka_pour_counter" in lines["moka_pour_magnet"]
     assert "M600 at 4.20 red, 5.40 green" in lines["moka_pour_clip"]
     assert "RH1 (red) and 2027 (green) on it at" in lines["moka_pour_rh1_clip"]
+    assert ("font 9 mm (smallest: 8.3 mm, the gap in '@'; the stream takes 9 mm)"
+            in lines["moka_pour_team_clip"])
     assert "backing plate 26.8 x" in lines["moka_pour_clip"]
 
 
@@ -74,15 +76,32 @@ def test_an_override_that_makes_two_charms_one_lists_it_once(capsys):
     assert names == ["moka_pour_eyelet", "moka_pour_magnet", "moka_pour_clip"]
 
 
+def test_a_text_for_every_charm_makes_the_team_clip_once(capsys):
+    """With --set text=X, moka_pour_team_clip builds the parts of moka_pour_clip: they are
+    made once, by the first name."""
+    assert _run(["list", "moka", "--wear", "clip", "--set", "text=services"]) == 0
+    names = [line.split()[0] for line in capsys.readouterr().out.splitlines()]
+    assert names == ["moka_pour_clip", "moka_pour_rh1_clip"]
+    assert _run(["list", "moka_pour_team_clip", "moka_pour_clip", "--set", "text=x"]) == 0
+    names = [line.split()[0] for line in capsys.readouterr().out.splitlines()]
+    assert names == ["moka_pour_team_clip"]
+
+
 @pytest.mark.parametrize("names, wear_, layout, expected", [
     ([], None, None, list(VARIANTS)),
     (["moka"], None, None, ["moka_eyelet", "moka_magnet", "moka_pour_eyelet",
-                            "moka_pour_magnet", "moka_pour_clip", "moka_pour_rh1_clip"]),
+                            "moka_pour_magnet", "moka_pour_clip", "moka_pour_rh1_clip",
+                            "moka_pour_team_clip"]),
     ([], "clip", None, ["tag_one_line_clip", "tag_two_lines_clip", "moka_pour_clip",
-                        "moka_pour_rh1_clip"]),
-    (["moka"], "clip", None, ["moka_pour_clip", "moka_pour_rh1_clip"]),  # the layouts with it
+                        "moka_pour_rh1_clip", "moka_pour_team_clip"]),
+    (["moka"], "clip", None, ["moka_pour_clip", "moka_pour_rh1_clip",
+                              "moka_pour_team_clip"]),  # the layouts with it
     (["moka"], "eyelet", "pour_rh1", ["moka_pour_rh1_eyelet"]),  # none has it: it fails later
     ([], None, "pour_rh1", ["moka_pour_rh1_clip"]),
+    ([], None, "pour_team", ["moka_pour_team_clip"]),
+    (["moka"], "magnet", "pour_team", ["moka_pour_team_magnet"]),  # it fails later
+    ([], "magnet", "pour_team", ["moka_pour_team_magnet"]),  # without a CHARM, the same
+    ([], "clip", "pour", ["moka_pour_clip"]),
     (["moka_clip"], None, None, ["moka_clip"]),  # asked for by name: it fails with the reason
     (["tag"], None, "two_lines", ["tag_two_lines_eyelet", "tag_two_lines_magnet",
                                   "tag_two_lines_clip"]),
@@ -124,6 +143,10 @@ def test_selection(names, wear_, layout, expected):
     (["list", "tag", "--set", "font_size=nan"], "font_size must be a number, not nan"),
     (["list", "tag", "--set", "band_t=0.4004"], "is not a whole number of 0.2 mm layers"),
     (["export", "tag_two_lines_clip", "--set", "lanyard_w=57"], "cannot lie over the centre"),
+    (["export", "moka", "--wear", "magnet", "--layout", "pour_team"],
+     "the pour_team layout is made as a clip only"),
+    (["export", "--wear", "eyelet", "--layout", "pour_team"],  # no CHARM: the same reason
+     "or use moka_pour_eyelet or moka_pour_magnet with --set text=team@italy"),
     (["slice", "tag", "--copies", "3"], "slice takes no CHARM and no options"),
     (["frobnicate"], "unknown command"),
 ])

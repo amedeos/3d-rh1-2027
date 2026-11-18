@@ -9,10 +9,12 @@ centre of mass, `magnet` pockets on the bed side (with a counter plate worn insi
 shirt), or a lanyard `clip` on the back. The tag has two layouts: `one_line` and
 `two_lines`. The moka has none, or `pour`: the moka that pours, with a text along the stream
 (`moka_pour_eyelet`, ...), or `pour_rh1`: the same, with a clip only, and `RH1` and `2027` on
-its backing plate (`moka_pour_rh1_clip`). Each subject and layout is a drawing (`drawing()`)
-with its own colours, bands and ways to wear it (`default_wears()`). `VARIANTS` holds every
-default combination; `charm()` makes any other one (the plain moka with a clip is a clear
-error from wear.py: it is too narrow; the moka that pours gets a backing plate).
+its backing plate (`moka_pour_rh1_clip`), or `pour_team`: the same, with a clip only, and
+`team@italy` along the stream, for the whole Italian team (`moka_pour_team_clip`). Each
+subject and layout is a drawing (`drawing()`) with its own colours, bands and ways to wear
+it (`default_wears()`). `VARIANTS` holds every default combination; `charm()` makes any
+other one (the plain moka with a clip is a clear error from wear.py: it is too narrow; the
+moka that pours gets a backing plate).
 """
 
 import math
@@ -24,18 +26,30 @@ from .text import LAYOUTS
 
 SUBJECTS = ("tag", "moka")
 WEARS = ("eyelet", "magnet", "clip")
-POUR_LAYOUTS = ("pour", "pour_rh1")  # the moka that pours: the same drawing
+POUR_LAYOUTS = ("pour", "pour_rh1", "pour_team")  # the moka that pours: the same drawing
 LAYOUTS_OF = {"tag": LAYOUTS, "moka": ("", *POUR_LAYOUTS)}  # "" = the moka without a layout
 # the texts on the backing plate of the clip (top right, bottom centre), by layout: the
 # owner's choice (2026-11-17). Other layouts have none and ignore plate_top and plate_bottom.
 PLATE_TEXTS = {"pour_rh1": ("RH1", "2027")}
 PLATE_COLOURS = ("red", "green")  # the filaments of the top and the bottom text
-LAYOUT_WEARS = {"pour_rh1": ("clip",)}  # the plate exists only with a clip
+# the layouts that only some ways of wearing have: (those ways, why, and what else to do:
+# validate's message)
+LAYOUT_WEARS = {
+    "pour_rh1": (("clip",), "puts its texts on the backing plate of the clip", ""),
+    "pour_team": (("clip",),
+                  ("is made as a clip only, for the whole Italian team (the owner's choice, "
+                   "2026-11-18)"),
+                  ", or use moka_pour_eyelet or moka_pour_magnet with --set text=team@italy"),
+}
 DEFAULT_TEXT = "consulting@italy:~$"
 POUR_TEXT = "consulting"  # the text of the moka that pours (the owner's choice, 2026-11-17)
 # the drawings with a text, in raised red letters (red cannot print their body), and their
 # default text
 TEXTS = {"tag": DEFAULT_TEXT, "moka_pour": POUR_TEXT}
+# a layout that is another one with its own default text: (that layout, the text). The clip
+# for the whole Italian team (the owner's choice after a test print, 2026-11-18). With the
+# same text, it builds the same parts as that layout (Charm.same_parts)
+TEXT_LAYOUTS = {"pour_team": ("pour", "team@italy")}
 # from the bed up: dark over white covers well, and red right above white gives the raised
 # letters clean red walls. The moka that pours has no black: its knob and handle are red.
 DEFAULT_BANDS = {"tag": ("white", "red", "green"), "moka": ("white", "red", "green", "black"),
@@ -52,17 +66,23 @@ def drawing(subject: str, layout: str) -> str:
 
 def default_wears(subject: str, layout: str) -> tuple[str, ...]:
     """The ways to wear a subject and layout that VARIANTS holds."""
-    return LAYOUT_WEARS.get(layout, DEFAULT_WEARS[drawing(subject, layout)])
+    if layout in LAYOUT_WEARS:
+        return LAYOUT_WEARS[layout][0]
+    return DEFAULT_WEARS[drawing(subject, layout)]
 
 
 @dataclass(frozen=True)
 class Charm:
     subject: str  # tag | moka
     wear: str = "eyelet"  # eyelet | magnet | clip
-    layout: str = ""  # tag: one_line | two_lines ("" = one_line); moka: "" | pour | pour_rh1
+    # tag: one_line | two_lines ("" = one_line); moka: "" | pour | pour_rh1 | pour_team
+    layout: str = ""
     # tag: two_lines splits at a line break or before the '@' (None = DEFAULT_TEXT); the
-    # moka that pours: one line along the stream (None = POUR_TEXT); the plain moka has no
-    # text and ignores one (so a --set text for every charm works)
+    # moka that pours: one line along the stream (None = the layout's own, TEXT_LAYOUTS, else
+    # POUR_TEXT); the plain moka has no text and ignores one (so a --set text for every
+    # charm works). The default is set here, so dataclasses.replace(c, layout=...) keeps the
+    # text of c (a plain field: the charms stay equal to the same charm with the text given);
+    # charm(name, layout=...) gives the new layout's own
     text: str | None = None
     # em size (mm); 0 = automatic: the smallest that prints (text.py), and on the moka that
     # pours at least artwork.POUR_FONT, so that the letters fill the stream
@@ -91,7 +111,8 @@ class Charm:
         if self.drawing in DEFAULT_BANDS and not self.bands:
             object.__setattr__(self, "bands", DEFAULT_BANDS[self.drawing])
         if self.text is None and self.drawing in TEXTS:
-            object.__setattr__(self, "text", TEXTS[self.drawing])
+            own = TEXT_LAYOUTS.get(self.layout)
+            object.__setattr__(self, "text", own[1] if own else TEXTS[self.drawing])
         if self.layout in PLATE_TEXTS:
             top, bottom = PLATE_TEXTS[self.layout]
             if self.plate_top is None:
@@ -112,6 +133,14 @@ class Charm:
         if self.layout:
             return f"{self.subject}_{self.layout}_{self.wear}"
         return f"{self.subject}_{self.wear}"
+
+    @property
+    def same_parts(self) -> "Charm":
+        """The charm whose parts this one builds: for a layout that is another one with its
+        own default text (TEXT_LAYOUTS), that layout with this text. So moka_pour_team_clip
+        with --set text=X builds what moka_pour_clip with X builds (a command makes it once)."""
+        own = TEXT_LAYOUTS.get(self.layout)
+        return replace(self, layout=own[0]) if own else self
 
     @property
     def band_ts(self) -> tuple[float, ...]:
@@ -160,10 +189,10 @@ class Charm:
             raise ValueError(f"{self.name}: the text is empty")
         if self.drawing == "moka_pour" and "\n" in self.text:
             raise ValueError(f"{self.name}: the moka's text is one line, without a line break")
-        if self.layout in LAYOUT_WEARS and self.wear not in LAYOUT_WEARS[self.layout]:
-            raise ValueError(f"{self.name}: the {self.layout} layout puts its texts on the backing "
-                             f"plate of the clip: wear it with a "
-                             f"{' or '.join(LAYOUT_WEARS[self.layout])}")
+        if self.layout in LAYOUT_WEARS and self.wear not in LAYOUT_WEARS[self.layout][0]:
+            wears, why, other = LAYOUT_WEARS[self.layout]
+            raise ValueError(f"{self.name}: the {self.layout} layout {why}: wear it with a "
+                             f"{' or '.join(wears)}{other}")
         for t, colour in zip((self.plate_top, self.plate_bottom), PLATE_COLOURS):
             if not t:
                 continue
@@ -235,8 +264,8 @@ VARIANTS = _variants()
 def parse_name(name: str) -> tuple[str, str, str]:
     """'tag_two_lines_clip' -> ('tag', 'two_lines', 'clip'); 'moka_eyelet' -> ('moka', '',
     'eyelet'); 'moka_pour_clip' -> ('moka', 'pour', 'clip'); 'moka_pour_rh1_clip' -> ('moka',
-    'pour_rh1', 'clip'). Any combination parses: the plain moka with a clip fails later, with
-    the reason."""
+    'pour_rh1', 'clip'); 'moka_pour_team_clip' -> ('moka', 'pour_team', 'clip'). Any
+    combination parses: the plain moka with a clip fails later, with the reason."""
     subject, _, rest = name.partition("_")
     layout, _, wear = rest.rpartition("_")
     if subject not in SUBJECTS or wear not in WEARS or layout not in LAYOUTS_OF[subject]:
@@ -247,7 +276,8 @@ def parse_name(name: str) -> tuple[str, str, str]:
 
 def charm(name: str, **overrides) -> Charm:
     """A charm by name (any subject_layout_wear), with some parameters changed. A new layout
-    comes first: the defaults (bands, text) are its drawing's."""
+    comes first: the defaults are its own (bands: its drawing's; text: its own in
+    TEXT_LAYOUTS, else its drawing's)."""
     subject, layout, wear = parse_name(name)
     c = replace(Charm(subject, wear, overrides.pop("layout", layout)), **overrides)
     c.validate()

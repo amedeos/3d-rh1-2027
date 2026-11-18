@@ -1,5 +1,6 @@
 """The moka that pours: its variants and defaults, the stream and its text, the colours, the
-two magnets, the clip on a backing plate, and RH1 and 2027 on that plate."""
+two magnets, the clip on a backing plate, RH1 and 2027 on that plate, and the clip for the
+whole Italian team (team@italy)."""
 
 import math
 import re
@@ -19,6 +20,7 @@ from rh1charms.text import arc_text, glyph_limits, limits, same_features, text_g
 POUR = [c for c in VARIANTS.values() if c.layout == "pour"]
 EYELET, MAGNET, CLIP = (VARIANTS[f"moka_pour_{w}"] for w in ("eyelet", "magnet", "clip"))
 RH1 = VARIANTS["moka_pour_rh1_clip"]
+TEAM = VARIANTS["moka_pour_team_clip"]
 NEED = P.LANYARD_W + P.CHANNEL_EXTRA + 2 * P.RISER_W  # the plate's width
 
 
@@ -430,3 +432,47 @@ def test_a_wide_bottom_text_alone_gets_the_size_the_plate_allows():
 def test_plate_texts_that_cannot_print_are_clear_errors(changes, message):
     with pytest.raises(ValueError, match=re.escape(message)):
         wear.layout(charm("moka_pour_rh1_clip", **changes))
+
+
+# --- the clip for the whole Italian team (moka_pour_team_clip) ----------------------------
+def test_team_is_a_variant_with_a_clip_only():
+    assert [n for n in VARIANTS if n.startswith("moka_pour_team")] == ["moka_pour_team_clip"]
+    assert TEAM.text == "team@italy" and (TEAM.plate_top, TEAM.plate_bottom) == (None, None)
+    assert (TEAM.bands, TEAM.band_ts) == (CLIP.bands, CLIP.band_ts)
+    for w in ("eyelet", "magnet"):
+        with pytest.raises(ValueError, match="clip only, for the whole Italian team.*"
+                                             "use moka_pour_eyelet or moka_pour_magnet"):
+            charm(f"moka_pour_team_{w}")
+    assert charm("moka_pour_team_clip", text="espresso").text == "espresso"
+
+
+def test_team_text_comes_with_its_layout():
+    """charm(name, layout=...) gives the new layout's own text, both ways; replace() keeps
+    the text it has (the default is set when the charm is made). With the same text, the
+    team clip builds the parts of moka_pour_clip (same_parts)."""
+    assert charm("moka_pour_clip", layout="pour_team") == TEAM
+    assert charm("moka_pour_team_clip", layout="pour") == CLIP
+    assert replace(CLIP, layout="pour_team").text == "consulting"
+    assert TEAM.same_parts == charm("moka_pour_clip", text="team@italy") != CLIP
+    assert charm("moka_pour_team_clip", text="services").same_parts == charm(
+        "moka_pour_clip", text="services")
+    assert CLIP.same_parts is CLIP and RH1.same_parts is RH1
+
+
+def test_team_is_the_printed_test():
+    """The owner printed moka_pour_clip with --set text=team@italy (2026-11-18): clean colours
+    and letters; the narrowest slot of the '@' (between its stem and its ring) looked partly
+    closed in a close-up, and the owner kept it. The variant is that charm under its own
+    name: the same slabs, clip, plate, size, centre of mass and colour changes."""
+    trial = charm("moka_pour_clip", text="team@italy")
+    lay, printed = wear.layout(TEAM), wear.layout(trial)
+    for (b, z0, z1), (p, p0, p1) in zip(lay.slabs, printed.slabs, strict=True):
+        assert b.equals(p) and (z0, z1) == (p0, p1)
+    assert (lay.clip.channel, lay.clip.bars) == (printed.clip.channel, printed.clip.bars)
+    assert lay.clip.plate.equals(printed.clip.plate) and lay.clip.letters == ()
+    assert (lay.size, lay.centre) == (printed.size, printed.centre)
+    assert wear.colour_changes(TEAM) == wear.colour_changes(trial)
+    assert lay.art.font_size == artwork.POUR_FONT == 9.0
+    assert artwork.smallest_size(TEAM) == (8.3, "the gap in '@'")
+    assert lay.size == pytest.approx((84.9, 51.4, 6.0), abs=0.05)
+    assert [z for z, _ in wear.colour_changes(TEAM)] == pytest.approx([4.2, 5.4])
